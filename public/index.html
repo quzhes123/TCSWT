@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商务通 · 客户智能调研系统</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #d4d7dd; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #b8bcc4; }
+
+    /* 侧边导航 */
+    .nav-item { display:flex; align-items:center; gap:12px; padding:10px 14px; margin:2px 10px; border-radius:10px; cursor:pointer; color:#5b6472; font-size:14px; transition:all .18s; position:relative; }
+    .nav-item:hover { background:#f1f3f7; color:#1f2733; }
+    .nav-item.active { background:#eef3ff; color:#165DFF; font-weight:600; }
+    .nav-item.active::before { content:''; position:absolute; left:-10px; top:50%; transform:translateY(-50%); width:3px; height:20px; border-radius:0 3px 3px 0; background:#165DFF; }
+    .nav-item i { width:18px; text-align:center; font-size:15px; }
+    .nav-sub { font-size:11px; color:#9aa1ad; }
+
+    .cell-known { background: #fff; }
+    .cell-filled { background: rgba(0,180,42,0.08); border-left: 3px solid #00B42A; }
+    .cell-conflict { background: rgba(245,63,63,0.1); border: 1px solid rgba(245,63,63,0.4); }
+    .cell-unknown { background: #f7f8fa; color: #999; }
+    .src-tag { display:inline-block; margin-top:3px; font-size:11px; color:#d97706; background:rgba(245,158,11,0.1); padding:1px 6px; border-radius:4px; }
+    .progress-track { background: #eef1f5; border-radius: 999px; height: 6px; overflow: hidden; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg,#165DFF,#00B42A); transition: width .3s; }
+    [x-cloak] { display: none !important; }
+    .fade-enter { transition: opacity .15s, transform .15s; }
+    .drawer { transition: transform .25s ease; }
+    .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .tag-blue { background: rgba(22,93,255,0.1); color: #165DFF; }
+    .tag-green { background: rgba(0,180,42,0.12); color: #00B42A; }
+    .tag-amber { background: rgba(245,158,11,0.12); color: #d97706; }
+    .tag-red { background: rgba(245,63,63,0.1); color: #F53F3F; }
+    .tag-gray { background: #F5F7FA; color: #666; }
+    .card { background:#fff; border:1px solid #eceef2; border-radius:14px; }
+    .page-title { font-size:20px; font-weight:700; letter-spacing:-.01em; }
+  </style>
+</head>
+<body class="bg-[#f7f8fa] text-gray-800" x-data="app()" x-cloak x-init="init()">
+
+  <!-- 全局通知 -->
+  <div class="fixed top-5 right-6 space-y-2 z-[60]">
+    <template x-for="(t,i) in toasts" :key="i">
+      <div class="bg-white shadow-lg border border-gray-200 rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+           :class="{ 'border-green-300 bg-green-50': t.type==='ok', 'border-red-300 bg-red-50': t.type==='err' }">
+        <i :class="t.type==='ok' ? 'fas fa-circle-check text-green-500' : (t.type==='err' ? 'fas fa-circle-xmark text-red-500' : 'fas fa-info-circle text-blue-500')"></i>
+        <span x-text="t.msg"></span>
+      </div>
+    </template>
+  </div>
+
+  <!-- ============ 整体布局：左侧菜单栏 + 右侧内容 ============ -->
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- 左侧菜单栏 -->
+    <aside class="w-60 flex-shrink-0 bg-white border-r border-[#eceef2] flex flex-col">
+      <!-- Logo -->
+      <div class="px-5 py-5 flex items-center gap-3 border-b border-[#f0f1f4]">
+        <div class="w-9 h-9 bg-[#165DFF] rounded-xl flex items-center justify-center text-white shadow-sm">
+          <i class="fas fa-magnifying-glass-chart"></i>
+        </div>
+        <div class="leading-tight">
+          <div class="text-[15px] font-bold text-gray-800">商务通</div>
+          <div class="nav-sub">智能调研</div>
+        </div>
+      </div>
+
+      <!-- 导航 -->
+      <nav class="flex-1 py-3 overflow-y-auto">
+        <div class="px-5 pb-2 pt-1 text-[11px] font-semibold text-gray-400 tracking-wider">工作区</div>
+        <div class="nav-item" :class="{'active': tab==='workspace'}" @click="tab='workspace'">
+          <i class="fas fa-wand-magic-sparkles"></i>
+          <div class="flex-1">智能调研</div>
+        </div>
+        <div class="nav-item" :class="{'active': tab==='customers'}" @click="tab='customers'; loadAll()">
+          <i class="fas fa-users"></i>
+          <div class="flex-1">客户看板</div>
+          <span class="tag tag-gray !px-1.5 !py-0 text-[10px]" x-show="stats.total" x-text="stats.total"></span>
+        </div>
+        <div class="px-5 pb-2 pt-4 text-[11px] font-semibold text-gray-400 tracking-wider">输出</div>
+        <div class="nav-item" :class="{'active': tab==='export'}" @click="tab='export'">
+          <i class="fas fa-file-export"></i>
+          <div class="flex-1">导出报告</div>
+        </div>
+      </nav>
+
+      <!-- 底部状态 -->
+      <div class="px-4 py-3 border-t border-[#f0f1f4] space-y-2">
+        <div class="flex items-center gap-2 text-[11px] text-gray-500">
+          <span class="w-1.5 h-1.5 rounded-full" :class="health.search?.enabled ? 'bg-green-500' : 'bg-amber-500'"></span>
+          <span x-text="health.search?.enabled ? '搜索·'+(health.search.provider||'') : '搜索未启用'"></span>
+          <span class="text-gray-300">|</span>
+          <span class="truncate" x-text="health.model || ''"></span>
+        </div>
+        <div class="flex items-center gap-2 text-[11px] text-gray-400">
+          <i class="fas fa-user-circle"></i><span>调研分析师</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- 顶部细条 -->
+      <header class="h-14 flex-shrink-0 bg-white border-b border-[#eceef2] px-7 flex items-center justify-between">
+        <h1 class="page-title" x-text="tab==='workspace' ? '智能调研工作台' : (tab==='customers' ? '客户与统计看板' : '导出调研报告')"></h1>
+        <div class="flex items-center gap-3">
+          <span class="tag" :class="health.search?.enabled ? 'tag-green' : 'tag-amber'" x-show="health.model">
+            <i class="fas mr-1" :class="health.search?.enabled ? 'fa-globe' : 'fa-circle-exclamation'"></i>
+            <span x-text="health.search?.enabled ? '搜索已启用 ('+(health.search.provider||'')+')' : '搜索未启用'"></span>
+          </span>
+        </div>
+      </header>
+
+      <!-- 滚动主区 -->
+      <main class="flex-1 overflow-y-auto p-7">
+       <div class="w-full">
+
+    <!-- ============ Tab 1: 调研工作台 ============ -->
+    <section x-show="tab==='workspace'" class="space-y-4">
+
+      <div class="card p-5">
+        <h2 class="text-base font-semibold mb-3"><i class="fas fa-cloud-arrow-up text-[#165DFF] mr-1"></i>1. 上传客户信息表</h2>
+        <div class="grid md:grid-cols-3 gap-4 items-center">
+          <label class="md:col-span-2 border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center hover:border-[#165DFF] transition-colors cursor-pointer block">
+            <i class="fas fa-cloud-arrow-up text-3xl text-[#165DFF]"></i>
+            <div class="mt-2 text-sm text-gray-600">点击或拖拽上传 <span class="font-medium">客户信息表（.xlsx）</span></div>
+            <div class="text-xs text-gray-400 mt-1">参考 V1.xlsx 模板，自动识别全部 32 个字段表头</div>
+            <input type="file" accept=".xlsx" class="hidden" @change="upload($event)">
+          </label>
+          <div class="rounded-lg border px-4 py-3" :class="parseRes ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'">
+            <template x-if="!parseRes">
+              <div class="text-sm text-gray-400"><i class="fas fa-circle-info mr-1"></i> 等待上传...</div>
+            </template>
+            <template x-if="parseRes">
+              <div>
+                <div class="text-green-700 text-sm font-semibold flex items-center gap-1"><i class="fas fa-circle-check"></i> 文件已解析</div>
+                <div class="text-xs text-gray-700 mt-1.5">共识别 <b x-text="parseRes.customer_count"></b> 条客户记录，<b x-text="parseRes.field_count"></b> 个字段。</div>
+                <div class="text-[11px] text-gray-400 mt-1">已知字段将作为基准上下文</div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <div class="card p-5">
+        <h2 class="text-base font-semibold mb-3"><i class="fas fa-microchip text-[#165DFF] mr-1"></i>2. 选择调研模型</h2>
+        <div class="flex flex-wrap gap-2 mb-3">
+          <template x-for="m in modelOptions" :key="m">
+            <button class="px-3 py-1.5 rounded-lg text-sm border transition"
+                    :class="model===m ? 'bg-[#165DFF] text-white border-[#165DFF] shadow' : 'bg-white text-gray-600 border-gray-300 hover:border-[#165DFF]'"
+                    @click="model=m" x-text="m"></button>
+          </template>
+        </div>
+        <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          <i class="fas fa-circle-info mr-1"></i> 系统会基于已知字段做<strong>一致性校验</strong>，对空字段做<strong>主动调研补全</strong>，并强制要求模型给出可追溯的来源 URL。
+        </div>
+      </div>
+
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-base font-semibold"><i class="fas fa-list-check text-[#165DFF] mr-1"></i>3. 选择字段范围（可选，留空 = 全部）</h2>
+          <div class="flex gap-2">
+            <button class="text-xs text-[#165DFF] hover:underline" @click="selectedFields=[]">清空</button>
+            <button class="text-xs text-[#165DFF] hover:underline" @click="selectedFields=fields.filter(f=>!noResearch.includes(f.key)).map(f=>f.key)">全选</button>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <template x-for="f in fields" :key="f.key">
+            <label class="flex items-center gap-2 text-sm py-1 cursor-pointer" :class="noResearch.includes(f.key) ? 'opacity-40 cursor-not-allowed' : ''">
+              <input type="checkbox" :value="f.key" x-model="selectedFields" :disabled="noResearch.includes(f.key)" class="rounded">
+              <span x-text="f.label"></span>
+            </label>
+          </template>
+        </div>
+      </div>
+
+      <div class="card p-5">
+        <h2 class="text-base font-semibold mb-3"><i class="fas fa-play text-[#165DFF] mr-1"></i>4. 执行调研</h2>
+        <div class="flex items-center gap-3 flex-wrap">
+          <button @click="runResearch()" :disabled="!parseRes || job?.status==='running'"
+                  class="bg-[#165DFF] hover:bg-blue-600 disabled:bg-gray-300 text-white px-5 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition">
+            <i class="fas" :class="job?.status==='running' ? 'fa-spinner fa-spin' : 'fa-play'"></i>
+            <span x-text="job?.status==='running' ? '调研中...' : '基于已知信息执行调研'"></span>
+          </button>
+          <span class="text-xs text-gray-500" x-show="parseRes">将对 <b x-text="parseRes?.customer_count"></b> 名客户、<b x-text="(selectedFields.length || (fields.length - noResearch.length))"></b> 个字段发起调研</span>
+        </div>
+
+        <div class="mt-4" x-show="job">
+          <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+            <span>任务 <code class="text-gray-600" x-text="job?.id"></code> · 状态 <span class="tag" :class="{'tag-blue':job?.status==='running','tag-green':job?.status==='done','tag-red':job?.status==='failed'}" x-text="job?.status"></span></span>
+            <span x-show="job?.progress" x-text="`${job?.progress?.done||0} / ${job?.progress?.total||0}`"></span>
+          </div>
+          <div class="progress-track"><div class="progress-bar" :style="`width: ${job && job.progress?.total ? Math.round(job.progress.done/job.progress.total*100) : 0}%`"></div></div>
+          <div class="text-xs text-red-500 mt-1" x-show="job?.error" x-text="job?.error"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Tab 2: 客户列表 / 看板 ============ -->
+    <section x-show="tab==='customers'" class="space-y-4">
+      <!-- 看板 -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">客户总数</div>
+          <div class="text-2xl font-bold mt-1" x-text="stats.total||0"></div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">按客户等级</div>
+          <div class="mt-1.5 space-y-1 text-xs">
+            <template x-for="[k,v] in Object.entries(stats.byLevel||{})" :key="k">
+              <div class="flex justify-between"><span x-text="k"></span><span class="font-semibold" x-text="v"></span></div>
+            </template>
+          </div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">按展业区域</div>
+          <div class="mt-1.5 flex flex-wrap gap-1">
+            <template x-for="[k,v] in Object.entries(stats.byRegion||{})" :key="k">
+              <span class="tag tag-gray" x-text="`${k} ${v}`"></span>
+            </template>
+          </div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">按业务线 / 产品</div>
+          <div class="mt-1.5 space-y-1 text-xs">
+            <template x-for="[k,v] in Object.entries(stats.byBizLine||{})" :key="k">
+              <div class="flex justify-between"><span x-text="k"></span><span class="font-semibold" x-text="v"></span></div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- 搜索 -->
+      <div class="card p-3">
+        <div class="flex items-center gap-3 flex-wrap">
+          <div class="relative">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+            <input type="text" x-model="kw" @input.debounce.400ms="loadCustomers()" placeholder="按任意字段关键词检索（客户名/区域/APP/关键人...）"
+                   class="border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm w-80 focus:outline-none focus:ring focus:ring-blue-100 focus:border-[#165DFF]">
+          </div>
+          <select x-model="filterLevel" @change="loadCustomers()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">全部等级</option>
+            <template x-for="k in Object.keys(stats.byLevel||{})" :key="k"><option x-text="k"></option></template>
+          </select>
+          <select x-model="filterRegion" @change="loadCustomers()" class="border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">全部区域</option>
+            <template x-for="k in Object.keys(stats.byRegion||{})" :key="k"><option x-text="k"></option></template>
+          </select>
+          <button class="text-sm text-gray-500 hover:text-gray-700 ml-auto" @click="loadAll()"><i class="fas fa-rotate mr-1"></i>刷新</button>
+        </div>
+      </div>
+
+      <!-- 客户表 -->
+      <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="bg-gray-50 text-left text-xs text-gray-600">
+                <th class="px-4 py-3">客户名称 / APP</th>
+                <th class="px-4 py-3">展业区域</th>
+                <th class="px-4 py-3">等级</th>
+                <th class="px-4 py-3">业务线 / 产品</th>
+                <th class="px-4 py-3">调研完整度</th>
+                <th class="px-4 py-3">状态</th>
+                <th class="px-4 py-3 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <template x-for="c in customers" :key="c.id">
+                <tr class="hover:bg-blue-50/30 cursor-pointer" @click="openReport(c.id)">
+                  <td class="px-4 py-3"><div class="font-medium" x-text="c.customer_name"></div><div class="text-xs text-gray-400" x-text="c.raw_known?.app_name || '—'"></div></td>
+                  <td class="px-4 py-3" x-text="c.region || '—'"></td>
+                  <td class="px-4 py-3"><span class="tag tag-blue" x-text="c.customer_level || '—'"></span></td>
+                  <td class="px-4 py-3" x-text="c.business_line || c.product_type || '—'"></td>
+                  <td class="px-4 py-3">
+                    <div class="progress-track w-24"><div class="progress-bar" :style="`width:${c._stat?.completeness||0}%`"></div></div>
+                    <span class="text-[11px] text-gray-400" x-text="(c._stat?.completeness||0)+'%'"></span>
+                  </td>
+                  <td class="px-4 py-3">
+                    <template x-if="c._stat?.nConflict > 0"><span class="tag tag-red"><i class="fas fa-triangle-exclamation mr-1"></i>有冲突 <span x-text="c._stat.nConflict"></span></span></template>
+                    <template x-if="!c._stat?.nConflict && c._stat?.nFilled > 0"><span class="tag tag-green"><i class="fas fa-check mr-1"></i>已补充</span></template>
+                    <template x-if="!c._stat?.nFilled && !c._stat?.nConflict"><span class="tag tag-amber"><i class="fas fa-spinner mr-1"></i>待调研</span></template>
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <button class="text-[#165DFF] hover:underline text-sm font-medium" @click.stop="openReport(c.id)"><i class="fas fa-file-lines mr-1"></i>查看报告</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="customers.length===0"><td colspan="7" class="text-center text-gray-400 py-8">暂无客户，请先到「调研工作台」上传 V1.xlsx</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Tab 3: 导出 V2 ============ -->
+    <section x-show="tab==='export'" class="space-y-4">
+      <div class="card p-6">
+        <h2 class="text-base font-semibold mb-2"><i class="fas fa-table-list text-[#165DFF] mr-1"></i>V2 整合总表</h2>
+        <p class="text-sm text-gray-500 mb-4">将所有客户调研结果合并为一张总表。冲突字段以英文分号(;)罗列并红底标记；补全字段绿底；附 <b>字段来源</b> 子表。</p>
+        <a href="/api/export/v2.xlsx" target="_blank" class="inline-flex items-center gap-2 bg-[#165DFF] hover:bg-blue-600 text-white px-5 py-2.5 rounded-lg text-sm font-medium">
+          <i class="fas fa-download"></i> 下载 V2.xlsx
+        </a>
+        <div class="mt-3 text-xs text-gray-400"><i class="fas fa-circle-info mr-1"></i> 第二张工作表「字段来源」记录每条调研值的 URL/标题/佐证摘录，便于人工复核。</div>
+      </div>
+    </section>
+       </div><!-- /full-width -->
+      </main>
+    </div><!-- /右侧内容区 -->
+  </div><!-- /flex 整体布局 -->
+
+  <!-- ============ 报告抽屉 ============ -->
+  <div x-show="reportOpen" x-transition.opacity class="fixed inset-0 bg-black/40 z-40" @click="reportOpen=false"></div>
+  <aside x-show="reportOpen" class="fixed top-0 right-0 h-full w-full md:w-[60%] lg:w-[55%] bg-white z-50 shadow-2xl drawer overflow-y-auto"
+         :style="reportOpen ? 'transform: translateX(0)' : 'transform: translateX(100%)'">
+    <div class="px-6 py-4 border-b border-gray-200 sticky top-0 bg-white z-10 flex items-center justify-between">
+      <div>
+        <h3 class="text-lg font-semibold" x-text="report?.customer?.customer_name || '调查报告'"></h3>
+        <p class="text-xs text-gray-400 mt-0.5" x-text="(report?.customer?.region || '') + ' · ' + (report?.customer?.raw_known?.app_name || '')"></p>
+      </div>
+      <button class="text-gray-400 hover:text-gray-600" @click="reportOpen=false"><i class="fas fa-times text-lg"></i></button>
+    </div>
+
+    <div class="p-6 space-y-4" x-show="report">
+      <!-- 冲突总览 -->
+      <template x-if="reportConflictCount > 0">
+        <div class="text-sm bg-red-50 border border-red-200 text-red-600 rounded-lg px-3 py-2">
+          <i class="fas fa-triangle-exclamation mr-1"></i> 检测到 <b x-text="reportConflictCount"></b> 处字段冲突，已双保留并标红，请人工校验。
+        </div>
+      </template>
+
+      <!-- 字段分组展示 -->
+      <template x-for="[group, items] in groupedReport" :key="group">
+        <div class="bg-gray-50 rounded-lg p-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-3" x-text="groupLabels[group] || group"></h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <template x-for="f in items" :key="f.key">
+              <div class="rounded p-3" :class="cellClass(f)">
+                <div class="text-xs text-gray-500 mb-1" x-text="f.label"></div>
+                <template x-if="f.r?.status==='conflict'">
+                  <div class="space-y-1">
+                    <template x-for="(v,i) in (f.r.values||[])" :key="i">
+                      <div class="flex items-baseline gap-2">
+                        <span class="tag tag-gray text-[10px]" x-text="i===0 ? '已知值' : '调研值'"></span>
+                        <span class="font-medium" x-text="v"></span>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+                <template x-if="f.r?.status!=='conflict'">
+                  <div class="font-medium" x-text="f.r?.value || '—'"></div>
+                </template>
+                <div class="text-[11px] text-gray-500 mt-1" x-text="f.r?.reason || ''"></div>
+                <template x-if="f.r?.sources?.length">
+                  <div class="mt-1 space-y-1">
+                    <template x-for="s in f.r.sources" :key="s.url">
+                      <a class="src-tag" :href="s.url" target="_blank">
+                        <i class="fas fa-link mr-1"></i><span x-text="s.title || s.url"></span>
+                      </a>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </aside>
+
+<script>
+function app() {
+  return {
+    tab: 'workspace',
+    health: {},
+    fields: [],
+    noResearch: ['customer_name', 'remark'],
+    selectedFields: [],
+    modelOptions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    model: 'claude-opus-4-8',
+    parseRes: null,
+
+    customers: [],
+    stats: {},
+    kw: '', filterLevel: '', filterRegion: '',
+
+    job: null, _pollTimer: null,
+    report: null, reportOpen: false,
+    toasts: [],
+
+    groupLabels: {
+      basic: '基本信息', app: 'APP', product: '产品', biz: '业务规模',
+      data: '数据', collection: '催收', people: '人员', goal: '目标', meta: '其他'
+    },
+
+    async init() {
+      const [hf, ff] = await Promise.all([
+        fetch('/api/health').then(r => r.json()),
+        fetch('/api/fields').then(r => r.json()),
+      ]);
+      this.health = hf;
+      this.fields = ff.fields;
+      await this.loadAll();
+    },
+
+    notify(msg, type='info') {
+      const t = { msg, type };
+      this.toasts.push(t);
+      setTimeout(() => { this.toasts = this.toasts.filter(x => x !== t); }, 3500);
+    },
+
+    async upload(ev) {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append('file', f);
+      try {
+        const r = await fetch('/api/upload', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '上传失败');
+        this.parseRes = j;
+        this.notify(`已识别 ${j.customer_count} 条客户、${j.field_count} 个字段`, 'ok');
+        await this.loadAll();
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      }
+    },
+
+    async runResearch() {
+      try {
+        const body = { model: this.model };
+        if (this.selectedFields.length) body.fields = this.selectedFields;
+        const r = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '触发失败');
+        this.job = j.job;
+        this.notify(`已触发调研任务 ${this.job.id}`, 'ok');
+        this.pollJob();
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      }
+    },
+
+    pollJob() {
+      clearInterval(this._pollTimer);
+      this._pollTimer = setInterval(async () => {
+        if (!this.job) return clearInterval(this._pollTimer);
+        const r = await fetch('/api/jobs/' + this.job.id).then(r => r.json());
+        this.job = r;
+        if (r.status === 'done' || r.status === 'failed') {
+          clearInterval(this._pollTimer);
+          this.notify(r.status === 'done' ? '调研已完成' : '调研失败：' + (r.error || ''), r.status === 'done' ? 'ok' : 'err');
+          await this.loadAll();
+        }
+      }, 1500);
+    },
+
+    async loadAll() {
+      await Promise.all([this.loadCustomers(), this.loadStats()]);
+    },
+
+    async loadCustomers() {
+      const params = new URLSearchParams();
+      if (this.kw) params.set('q', this.kw);
+      if (this.filterLevel) params.set('level', this.filterLevel);
+      if (this.filterRegion) params.set('region', this.filterRegion);
+      this.customers = await fetch('/api/customers?' + params.toString()).then(r => r.json());
+    },
+
+    async loadStats() {
+      this.stats = await fetch('/api/stats').then(r => r.json());
+    },
+
+    async openReport(id) {
+      this.report = await fetch(`/api/customers/${id}/report`).then(r => r.json());
+      this.reportOpen = true;
+    },
+
+    cellClass(f) {
+      if (!f.r) return 'cell-unknown';
+      if (f.r.status === 'conflict') return 'cell-conflict';
+      if (f.r.status === 'filled' || f.r.status === 'agree') return 'cell-filled';
+      if (f.r.status === 'known') return 'cell-known';
+      return 'cell-unknown';
+    },
+
+    get reportConflictCount() {
+      if (!this.report) return 0;
+      return Object.values(this.report.fields || {}).filter(r => r.status === 'conflict').length;
+    },
+
+    get groupedReport() {
+      if (!this.report) return [];
+      const map = {};
+      for (const f of this.fields) {
+        const r = this.report.fields?.[f.key];
+        const g = f.group || 'meta';
+        if (!map[g]) map[g] = [];
+        map[g].push({ key: f.key, label: f.label, r });
+      }
+      const order = ['basic','app','product','biz','data','collection','people','goal','meta'];
+      return order.filter(g => map[g]).map(g => [g, map[g]]);
+    },
+  };
+}
+</script>
+</body>
+</html>
