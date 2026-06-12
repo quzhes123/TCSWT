@@ -152,6 +152,16 @@
             <i class="fas md:mr-1" :class="health.search?.enabled ? 'fa-globe' : 'fa-circle-exclamation'"></i>
             <span class="hidden md:inline" x-text="health.search?.enabled ? '搜索已启用 ('+(health.search.provider||'')+')' : '搜索未启用'"></span>
           </span>
+          <div class="hidden sm:flex items-center gap-2 text-xs text-gray-500 px-2 py-1 rounded-md bg-gray-50 border border-gray-100">
+            <i class="fas fa-user-circle text-gray-400"></i>
+            <span x-text="me?.name || 'admin'"></span>
+          </div>
+          <button @click="logout()"
+                  class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors"
+                  title="退出登录">
+            <i class="fas fa-right-from-bracket"></i>
+            <span>退出</span>
+          </button>
         </div>
       </header>
 
