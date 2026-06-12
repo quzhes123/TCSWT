@@ -186,6 +186,16 @@
   </div>
 
 <script>
+// 默认表单值（独立函数，避免 Alpine 组件 data() 中 this 还未代理的初始化竞态）
+function emptyModelForm() {
+  return {
+    name: '', provider: 'anthropic', identifier: '', version: '', description: '',
+    api_url: '', auth_type: 'bearer', api_key: '',
+    custom_headers_text: '', custom_headers_error: '',
+    timeout: 120, max_retries: 3, concurrency: 4, enabled: true,
+  };
+}
+
 function modelsPage() {
   return {
     models: [],
@@ -194,16 +204,7 @@ function modelsPage() {
     saving: false,
     modalOpen: false,
     editingId: null,
-    form: this._emptyForm(),
-
-    _emptyForm() {
-      return {
-        name: '', provider: 'anthropic', identifier: '', version: '', description: '',
-        api_url: '', auth_type: 'bearer', api_key: '',
-        custom_headers_text: '', custom_headers_error: '',
-        timeout: 120, max_retries: 3, concurrency: 4, enabled: true,
-      };
-    },
+    form: emptyModelForm(),
 
     async init() {
       await this.load();
@@ -225,7 +226,7 @@ function modelsPage() {
 
     openNew() {
       this.editingId = null;
-      this.form = this._emptyForm();
+      this.form = emptyModelForm();
       this.modalOpen = true;
     },
     async openEdit(m) {
