@@ -214,11 +214,32 @@ export function computeStats() {
 }
 
 // ========== Models（多模型配置）==========
-// 公开返回：永远不带 api_key（密文也不返），只用 has_key 标记
+// 公开返回：永远不带 api_key 密文,且对 custom_headers 中的敏感值脱敏（防止明文泄漏）
+const SENSITIVE_HEADER_KEYS = /^(authorization|x-api-key|x-goog-api-key|api-key|cookie|x-auth-token)$/i;
+function maskHeaders(headers) {
+  if (!headers || typeof headers !== 'object') return {};
+  const out = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (SENSITIVE_HEADER_KEYS.test(k)) {
+      out[k] = v ? '••••••••' : '';
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
 function publicModel(m) {
   if (!m) return m;
-  const { api_key_encrypted, ...rest } = m;
-  return { ...rest, has_key: !!api_key_encrypted };
+  const { api_key_encrypted, custom_headers, ...rest } = m;
+  return {
+    ...rest,
+    custom_headers: maskHeaders(custom_headers),
+    has_key: !!api_key_encrypted || hasSensitiveHeader(custom_headers),
+  };
+}
+function hasSensitiveHeader(headers) {
+  if (!headers) return false;
+  return Object.keys(headers).some(k => SENSITIVE_HEADER_KEYS.test(k) && !!headers[k]);
 }
 export function listModels({ enabledOnly = false } = {}) {
   const list = load().models.slice();
@@ -268,9 +289,19 @@ export function updateModel(id, patch) {
   const m = s.models.find(x => x.id === id);
   if (!m) return null;
   const fields = ['name','identifier','provider','version','description',
-                  'api_url','auth_type','custom_headers','timeout','max_retries',
+                  'api_url','auth_type','timeout','max_retries',
                   'concurrency','request_template','response_path','enabled'];
   for (const k of fields) if (k in patch) m[k] = patch[k];
+  // custom_headers: 占位值 ••••••• 视为"保持原值",只更新非占位字段
+  if (patch.custom_headers && typeof patch.custom_headers === 'object') {
+    const merged = { ...(m.custom_headers || {}) };
+    for (const [k, v] of Object.entries(patch.custom_headers)) {
+      const isMask = typeof v === 'string' && /^•+$/.test(v);
+      if (!isMask) merged[k] = v;
+    }
+    // 用户可能删了某个 header(前端不传该 key) → 我们这里保守保留旧值,如需删除让 UI 显式发 null
+    m.custom_headers = merged;
+  }
   // api_key:有值才更新(空字符串视为不修改),前端用 '' 表示"保持原值"
   if (typeof patch.api_key === 'string' && patch.api_key.length > 0 && patch.api_key !== '••••••••') {
     m.api_key_encrypted = encrypt(patch.api_key);
@@ -298,23 +329,24 @@ export function recordModelTest(id, ok, errorMsg = '') {
   return publicModel(m);
 }
 
-/** 启动时自动迁移：db 中无任何 model 且 .env 配置了 ANTHROPIC_*，则建一条默认记录 */
+/** 启动时自动迁移：db 中无任何 model 且 .env 配置了 ANTHROPIC_*，则建一条默认记录
+ *  注意：之前老版本会把 Bearer key 写在 custom_headers.Authorization 明文存储，
+ *  现在改成 auth_type=bearer + api_key（加密入库），自动 driver 会拼好 Authorization 头。
+ */
 export function autoMigrateModels() {
   const s = load();
   if (s.models.length > 0) return null;
   const url = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
   const key = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || '';
-  if (!key) return null;  // 没 key 不强行建（避免空配置混淆）
+  if (!key) return null;
   const m = createModel({
     name: 'Claude Opus 4.8（默认）',
     identifier: process.env.ANTHROPIC_MODEL || 'claude-opus-4-8',
     provider: 'anthropic',
     api_url: url.replace(/\/$/, '') + '/v1/messages',
-    auth_type: process.env.ANTHROPIC_AUTH_TOKEN ? 'custom_header' : 'api_key_header',
+    auth_type: 'bearer',
     api_key: key,
-    custom_headers: process.env.ANTHROPIC_AUTH_TOKEN
-      ? { 'Authorization': 'Bearer ' + key, 'anthropic-version': '2023-06-01' }
-      : { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    custom_headers: { 'anthropic-version': '2023-06-01' },
     enabled: true,
     description: '系统首次启动从 .env 自动迁移',
   });
