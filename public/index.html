@@ -169,15 +169,15 @@
     <section x-show="tab==='workspace'" class="space-y-4">
 
       <div class="card p-4 md:p-5">
-        <!-- Tab 标签在一行 -->
-        <div class="flex items-center gap-3 mb-4 border-b border-gray-100 pb-2">
-          <h2 class="text-base font-semibold text-gray-400 mr-2">1. 录入方式</h2>
-          <button class="px-4 py-1.5 rounded-md text-sm font-medium transition border-b-2"
+        <!-- Tab 标签：标题 + 换行 + tab按钮 -->
+        <h2 class="text-base font-semibold text-gray-700 mb-3">1. 录入方式</h2>
+        <div class="flex items-center gap-2 mb-4 border-b border-gray-100">
+          <button class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
                   :class="inputMode==='name' ? 'text-[#165DFF] border-[#165DFF]' : 'text-gray-500 border-transparent hover:text-gray-700'"
                   @click="inputMode='name'">
             <i class="fas fa-building mr-1.5"></i>按公司名称
           </button>
-          <button class="px-4 py-1.5 rounded-md text-sm font-medium transition border-b-2"
+          <button class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
                   :class="inputMode==='file' ? 'text-[#165DFF] border-[#165DFF]' : 'text-gray-500 border-transparent hover:text-gray-700'"
                   @click="inputMode='file'">
             <i class="fas fa-file-excel mr-1.5"></i>按表格内容
