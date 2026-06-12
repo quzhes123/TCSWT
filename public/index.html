@@ -97,11 +97,16 @@
 
       <!-- 导航 -->
       <nav class="flex-1 py-3 overflow-y-auto">
-        <div class="px-5 pb-2 pt-1 text-[11px] font-semibold text-gray-400 tracking-wider">工作区</div>
-        <div class="nav-item" :class="{'active': tab==='workspace'}" @click="tab='workspace'; mobileNav=false">
-          <i class="fas fa-wand-magic-sparkles"></i>
-          <div class="flex-1">智能调研</div>
+        <div class="px-5 pb-2 pt-1 text-[11px] font-semibold text-gray-400 tracking-wider">智能调研</div>
+        <div class="nav-item" :class="{'active': tab==='workspace' && inputMode==='name'}" @click="tab='workspace'; inputMode='name'; mobileNav=false">
+          <i class="fas fa-building"></i>
+          <div class="flex-1">按公司名称调研</div>
         </div>
+        <div class="nav-item" :class="{'active': tab==='workspace' && inputMode==='file'}" @click="tab='workspace'; inputMode='file'; mobileNav=false">
+          <i class="fas fa-file-excel"></i>
+          <div class="flex-1">按表格内容调研</div>
+        </div>
+        <div class="px-5 pb-2 pt-4 text-[11px] font-semibold text-gray-400 tracking-wider">客户</div>
         <div class="nav-item" :class="{'active': tab==='customers'}" @click="tab='customers'; loadAll(); mobileNav=false">
           <i class="fas fa-users"></i>
           <div class="flex-1">客户看板</div>
@@ -145,7 +150,7 @@
           <button class="md:hidden text-gray-600 hover:text-gray-900 -ml-1 p-1" @click="mobileNav=true" aria-label="打开菜单">
             <i class="fas fa-bars text-lg"></i>
           </button>
-          <h1 class="page-title truncate" x-text="tab==='workspace' ? '智能调研工作台' : (tab==='customers' ? '客户与看板' : '导出调研报告')"></h1>
+          <h1 class="page-title truncate" x-text="tab==='workspace' ? (inputMode==='name'?'按公司名称调研':'按表格内容调研') : (tab==='customers' ? '客户与看板' : '导出调研报告')"></h1>
         </div>
         <div class="flex items-center gap-3 flex-shrink-0">
           <span class="tag" :class="health.search?.enabled ? 'tag-green' : 'tag-amber'" x-show="health.model">
@@ -173,21 +178,10 @@
     <section x-show="tab==='workspace'" class="space-y-4">
 
       <div class="card p-4 md:p-5">
-        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
-          <h2 class="text-base font-semibold"><i class="fas fa-cloud-arrow-up text-[#165DFF] mr-1"></i>1. 录入客户信息</h2>
-          <div class="inline-flex p-0.5 rounded-lg bg-gray-100 text-xs">
-            <button class="px-3 py-1 rounded-md transition"
-                    :class="inputMode==='file' ? 'bg-white shadow text-[#165DFF] font-semibold' : 'text-gray-500 hover:text-gray-700'"
-                    @click="inputMode='file'">
-              <i class="fas fa-file-excel mr-1"></i>上传表格
-            </button>
-            <button class="px-3 py-1 rounded-md transition"
-                    :class="inputMode==='name' ? 'bg-white shadow text-[#165DFF] font-semibold' : 'text-gray-500 hover:text-gray-700'"
-                    @click="inputMode='name'">
-              <i class="fas fa-keyboard mr-1"></i>键入客户名
-            </button>
-          </div>
-        </div>
+        <h2 class="text-base font-semibold mb-3">
+          <i class="fas mr-1 text-[#165DFF]" :class="inputMode==='name' ? 'fa-building' : 'fa-file-excel'"></i>
+          <span x-text="inputMode==='name' ? '1. 输入公司名称' : '1. 上传客户信息表'"></span>
+        </h2>
 
         <!-- 模式 A: 上传 xlsx -->
         <div x-show="inputMode==='file'" class="grid md:grid-cols-3 gap-4 items-center">
@@ -211,50 +205,15 @@
           </div>
         </div>
 
-        <!-- 模式 B: 键入客户名 -->
-        <div x-show="inputMode==='name'" class="space-y-3">
-          <div class="flex flex-col md:flex-row gap-2">
-            <div class="relative flex-1">
-              <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-              <input type="text" x-model="quickName"
-                     @keydown.enter="runQuickResearch()"
-                     placeholder="输入公司全称，如：杭州某某金融服务有限公司"
-                     class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
-            </div>
-            <select x-model="quickScope"
-                    class="px-3 py-2.5 text-sm border border-gray-300 rounded-lg bg-white focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
-              <option value="core">调研范围：核心字段（~6 个）</option>
-              <option value="all">调研范围：全部 30 个字段</option>
-            </select>
-            <button @click="runQuickResearch()" :disabled="!quickName.trim() || quickJob?.status==='running'"
-                    class="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition flex items-center justify-center gap-2
-                           bg-[#165DFF] hover:bg-blue-600 disabled:bg-gray-300">
-              <i class="fas" :class="quickJob?.status==='running' ? 'fa-spinner fa-spin' : 'fa-magnifying-glass-chart'"></i>
-              <span x-text="quickJob?.status==='running' ? '调研中...' : '发起调研'"></span>
-            </button>
+        <!-- 模式 B: 公司名称（仅输入名称，无范围选择、无独立按钮，统一走下方流程）-->
+        <div x-show="inputMode==='name'">
+          <div class="relative">
+            <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+            <input type="text" x-model="companyName"
+                   placeholder="输入公司全称，如：杭州某某金融服务有限公司"
+                   class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
           </div>
-          <div class="text-[11px] text-gray-500 leading-relaxed">
-            适合快速查一个客户。系统会创建一条新客户记录，由 <b x-text="model"></b> 根据公司名从官网 / 工商 / 行业源调研补全。
-          </div>
-          <div x-show="quickJob" class="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2.5">
-            <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
-              <span>快调任务 <code class="text-gray-700" x-text="quickJob?.id"></code> ·
-                <span class="tag" :class="{'tag-blue':quickJob?.status==='running','tag-green':quickJob?.status==='done','tag-red':quickJob?.status==='failed'}" x-text="quickJob?.status"></span>
-              </span>
-              <span x-show="quickJob?.progress" x-text="`${quickJob?.progress?.done||0} / ${quickJob?.progress?.total||0}`"></span>
-            </div>
-            <div class="progress-track">
-              <div class="progress-bar" :style="`width: ${quickJob && quickJob.progress?.total ? Math.round(quickJob.progress.done/quickJob.progress.total*100) : 0}%`"></div>
-            </div>
-            <div class="flex items-center justify-between mt-2">
-              <span class="text-xs text-red-500" x-show="quickJob?.error" x-text="quickJob?.error"></span>
-              <button x-show="quickJob?.status==='done' && quickCustomerId"
-                      @click="openReport(quickCustomerId)"
-                      class="ml-auto text-xs text-[#165DFF] hover:underline flex items-center gap-1">
-                <i class="fas fa-file-lines"></i>查看报告
-              </button>
-            </div>
-          </div>
+          <div class="text-[11px] text-gray-500 mt-2">系统将新建一条客户记录，按下方所选<b>模型</b>与<b>字段范围</b>联网调研补全（含来源标注）。</div>
         </div>
       </div>
 
@@ -293,21 +252,47 @@
       <div class="card p-4 md:p-5">
         <h2 class="text-base font-semibold mb-3"><i class="fas fa-play text-[#165DFF] mr-1"></i>4. 执行调研</h2>
         <div class="flex items-center gap-3 flex-wrap">
-          <button @click="runResearch()" :disabled="!parseRes || job?.status==='running'"
+          <button @click="runResearch()" :disabled="!canResearch || job?.status==='running'"
                   class="w-full md:w-auto justify-center bg-[#165DFF] hover:bg-blue-600 disabled:bg-gray-300 text-white px-5 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition">
             <i class="fas" :class="job?.status==='running' ? 'fa-spinner fa-spin' : 'fa-play'"></i>
-            <span x-text="job?.status==='running' ? '调研中...' : '基于已知信息执行调研'"></span>
+            <span x-text="job?.status==='running' ? '调研中...' : '执行调研任务'"></span>
           </button>
-          <span class="text-xs text-gray-500" x-show="parseRes">将对 <b x-text="parseRes?.customer_count"></b> 名客户、<b x-text="(selectedFields.length || (fields.length - noResearch.length))"></b> 个字段发起调研</span>
+          <span class="text-xs text-gray-500" x-show="canResearch && job?.status!=='running'">
+            将对 <b x-text="researchTargetDesc"></b>、<b x-text="selectedFields.length || (fields.length - noResearch.length)"></b> 个字段发起调研
+          </span>
         </div>
+        <div class="text-xs text-red-500 mt-2" x-show="researchError" x-text="researchError"></div>
 
+        <!-- 进度 + 每步进展 -->
         <div class="mt-4" x-show="job">
           <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
-            <span>任务 <code class="text-gray-600" x-text="job?.id"></code> · 状态 <span class="tag" :class="{'tag-blue':job?.status==='running','tag-green':job?.status==='done','tag-red':job?.status==='failed'}" x-text="job?.status"></span></span>
+            <span>任务 <code class="text-gray-600" x-text="job?.id"></code> ·
+              <span class="tag" :class="{'tag-blue':job?.status==='running','tag-green':job?.status==='done','tag-red':job?.status==='failed'}" x-text="jobStatusText"></span>
+            </span>
             <span x-show="job?.progress" x-text="`${job?.progress?.done||0} / ${job?.progress?.total||0}`"></span>
           </div>
           <div class="progress-track"><div class="progress-bar" :style="`width: ${job && job.progress?.total ? Math.round(job.progress.done/job.progress.total*100) : 0}%`"></div></div>
-          <div class="text-xs text-red-500 mt-1" x-show="job?.error" x-text="job?.error"></div>
+
+          <!-- 每步进展（替代弹窗提示）-->
+          <div x-show="job?.steps?.length" class="mt-3 border border-gray-100 rounded-lg bg-gray-50/70 max-h-60 overflow-y-auto divide-y divide-gray-100" x-ref="stepBox">
+            <template x-for="(s,i) in (job?.steps||[])" :key="i">
+              <div class="flex items-center gap-2 px-3 py-1.5 text-xs">
+                <i class="fas w-3.5 text-center flex-shrink-0" :class="stepIcon(s.status)"></i>
+                <span class="text-gray-700 flex-shrink-0" x-text="s.label"></span>
+                <span class="text-gray-400 truncate" :title="s.value || stepStatusZh(s.status)" x-text="s.value ? '→ '+s.value : stepStatusZh(s.status)"></span>
+              </div>
+            </template>
+          </div>
+
+          <div class="flex items-center justify-between mt-2 gap-3">
+            <span class="text-xs text-red-500" x-show="job?.error" x-text="job?.error"></span>
+            <template x-if="job?.status==='done'">
+              <button @click="lastReportCustomerId ? openReport(lastReportCustomerId) : (tab='customers', loadAll())"
+                      class="ml-auto text-xs text-[#165DFF] hover:underline flex items-center gap-1">
+                <i class="fas fa-file-lines"></i><span x-text="lastReportCustomerId ? '查看报告' : '去客户看板'"></span>
+              </button>
+            </template>
+          </div>
         </div>
       </div>
     </section>
@@ -500,13 +485,11 @@ function app() {
     model: 'claude-opus-4-8',
     parseRes: null,
 
-    // 输入模式：file = 上传 xlsx；name = 键入客户名
-    inputMode: 'file',
-    quickName: '',
-    quickScope: 'core',
-    quickJob: null,
-    quickCustomerId: null,
-    _quickTimer: null,
+    // 输入模式：name = 按公司名称；file = 按表格内容
+    inputMode: 'name',
+    companyName: '',
+    lastReportCustomerId: null,
+    researchError: '',
 
     customers: [],
     stats: {},
@@ -562,65 +545,70 @@ function app() {
     },
 
     async runResearch() {
+      if (!this.canResearch || this.job?.status === 'running') return;
+      this.researchError = '';
+      const fieldsBody = this.selectedFields.length ? this.selectedFields : undefined;
       try {
-        const body = { model: this.model };
-        if (this.selectedFields.length) body.fields = this.selectedFields;
-        const r = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || '触发失败');
-        this.job = j.job;
-        this.notify(`已触发调研任务 ${this.job.id}`, 'ok');
+        let j;
+        if (this.inputMode === 'name') {
+          const name = this.companyName.trim();
+          const body = { name, model: this.model };
+          if (fieldsBody) body.fields = fieldsBody;
+          const r = await fetch('/api/research/by-name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          j = await r.json();
+          if (!r.ok) throw new Error(j.error || '触发失败');
+          this.lastReportCustomerId = j.customer?.id || null;
+        } else {
+          const body = { model: this.model };
+          if (fieldsBody) body.fields = fieldsBody;
+          const r = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          j = await r.json();
+          if (!r.ok) throw new Error(j.error || '触发失败');
+          this.lastReportCustomerId = null;
+        }
+        this.job = j.job;            // 进度与每步进展直接展示在进度条下方，不再弹窗
         this.pollJob();
       } catch (e) {
-        this.notify(String(e.message || e), 'err');
+        this.researchError = String(e.message || e);
       }
-    },
-
-    async runQuickResearch() {
-      const name = this.quickName.trim();
-      if (!name) return;
-      const coreFields = ['region','customer_level','business_line','product_type','app_name','launch_time'];
-      try {
-        const body = { name, model: this.model };
-        if (this.quickScope === 'core') body.fields = coreFields;
-        const r = await fetch('/api/research/by-name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-        const j = await r.json();
-        if (!r.ok) throw new Error(j.error || '触发失败');
-        this.quickJob = j.job;
-        this.quickCustomerId = j.customer?.id;
-        this.notify(`已发起调研：${name}`, 'ok');
-        this.pollQuickJob();
-      } catch (e) {
-        this.notify(String(e.message || e), 'err');
-      }
-    },
-
-    pollQuickJob() {
-      clearInterval(this._quickTimer);
-      this._quickTimer = setInterval(async () => {
-        if (!this.quickJob) return clearInterval(this._quickTimer);
-        const r = await fetch('/api/jobs/' + this.quickJob.id).then(r => r.json());
-        this.quickJob = r;
-        if (r.status === 'done' || r.status === 'failed') {
-          clearInterval(this._quickTimer);
-          this.notify(r.status === 'done' ? '快速调研完成' : '调研失败：' + (r.error || ''), r.status === 'done' ? 'ok' : 'err');
-          await this.loadAll();
-        }
-      }, 1500);
     },
 
     pollJob() {
       clearInterval(this._pollTimer);
       this._pollTimer = setInterval(async () => {
         if (!this.job) return clearInterval(this._pollTimer);
-        const r = await fetch('/api/jobs/' + this.job.id).then(r => r.json());
-        this.job = r;
-        if (r.status === 'done' || r.status === 'failed') {
-          clearInterval(this._pollTimer);
-          this.notify(r.status === 'done' ? '调研已完成' : '调研失败：' + (r.error || ''), r.status === 'done' ? 'ok' : 'err');
-          await this.loadAll();
-        }
+        try {
+          const r = await fetch('/api/jobs/' + this.job.id).then(r => r.json());
+          this.job = r;
+          // 自动滚到最新步骤
+          this.$nextTick(() => { const box = this.$refs.stepBox; if (box) box.scrollTop = box.scrollHeight; });
+          if (r.status === 'done' || r.status === 'failed') {
+            clearInterval(this._pollTimer);
+            await this.loadAll();
+          }
+        } catch {}
       }, 1500);
+    },
+
+    get canResearch() {
+      return this.inputMode === 'name' ? !!this.companyName.trim() : !!this.parseRes;
+    },
+    get researchTargetDesc() {
+      if (this.inputMode === 'name') return this.companyName.trim() || '该公司';
+      return (this.parseRes?.customer_count || 0) + ' 名客户';
+    },
+    get jobStatusText() {
+      return { running: '调研中', done: '已完成', failed: '失败', pending: '排队中' }[this.job?.status] || (this.job?.status || '');
+    },
+    stepIcon(s) {
+      if (s === 'filled' || s === 'agree') return 'fa-circle-check text-green-500';
+      if (s === 'conflict') return 'fa-triangle-exclamation text-red-500';
+      if (s === 'error') return 'fa-circle-xmark text-red-400';
+      if (s === 'unknown') return 'fa-circle-minus text-gray-400';
+      return 'fa-circle-notch text-gray-300';
+    },
+    stepStatusZh(s) {
+      return { filled: '已补全', agree: '已验证一致', conflict: '发现冲突', unknown: '未找到公开来源', error: '执行异常' }[s] || s;
     },
 
     async loadAll() {

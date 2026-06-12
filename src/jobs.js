@@ -5,6 +5,7 @@ import { FIELDS, NO_RESEARCH_FIELDS } from './field-spec.js';
 import * as db from './db.js';
 
 const FIELD_CONCURRENCY = parseInt(process.env.FIELD_CONCURRENCY || '4', 10);
+const LABEL_OF = Object.fromEntries(FIELDS.map(f => [f.key, f.label]));
 
 /**
  * 启动一个调研任务（异步执行；调用方拿 jobId 后轮询）
@@ -29,7 +30,7 @@ export function startResearchJob({ customer_ids, fields, model } = {}) {
     fields: targetFields,
     status: 'running',
     progress: { done: 0, total: customers.length * targetFields.length },
-    log: [],
+    steps: [],
   });
 
   // 异步执行（不 await）
@@ -42,35 +43,38 @@ export function startResearchJob({ customer_ids, fields, model } = {}) {
 
 async function runJob(jobId, customers, fields, model) {
   const limit = pLimit(FIELD_CONCURRENCY);
+  const total = customers.length * fields.length;
+  const multi = customers.length > 1;
+  const steps = [];
   let done = 0;
 
   const tasks = [];
   for (const customer of customers) {
     for (const field of fields) {
       tasks.push(limit(async () => {
+        let stepStatus = 'unknown', stepValue = '';
         try {
           const { result, sources } = await researchField({ customer, fieldKey: field, model });
-          db.saveResult({
-            job_id: jobId,
-            customer_id: customer.id,
-            field,
-            ...result,
-          }, sources);
+          db.saveResult({ job_id: jobId, customer_id: customer.id, field, ...result }, sources);
+          stepStatus = result.status || 'unknown';
+          stepValue = result.status === 'conflict'
+            ? (result.values || []).filter(Boolean).join(' / ')
+            : (result.value || '');
         } catch (e) {
           db.saveResult({
-            job_id: jobId,
-            customer_id: customer.id,
-            field,
-            status: 'unknown',
-            reason: '执行异常：' + (e?.message || e),
-            model,
+            job_id: jobId, customer_id: customer.id, field,
+            status: 'unknown', reason: '执行异常：' + (e?.message || e), model,
           }, []);
+          stepStatus = 'error';
         } finally {
           done += 1;
-          // 每 5 步落一次进度（少写 db）
-          if (done % 5 === 0 || done === customers.length * fields.length) {
-            db.updateJob(jobId, { progress: { done, total: customers.length * fields.length } });
-          }
+          steps.push({
+            label: (multi ? customer.customer_name + ' · ' : '') + (LABEL_OF[field] || field),
+            status: stepStatus,
+            value: String(stepValue || '').replace(/\s+/g, ' ').slice(0, 60),
+          });
+          // 每步都写：并发 4 + 每步是一次 LLM 调用，写入频率可控
+          db.updateJob(jobId, { progress: { done, total }, steps: steps.slice(-80) });
         }
       }));
     }
@@ -78,7 +82,8 @@ async function runJob(jobId, customers, fields, model) {
   await Promise.all(tasks);
   db.updateJob(jobId, {
     status: 'done',
-    progress: { done: customers.length * fields.length, total: customers.length * fields.length },
+    progress: { done: total, total },
+    steps: steps.slice(-80),
     finished_at: Date.now(),
   });
 }
