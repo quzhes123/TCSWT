@@ -52,6 +52,16 @@ export function replaceCustomers(customers) {
   persist();
   return s.customers;
 }
+export function addCustomer(customer) {
+  const s = load();
+  // 同名复用：如果已存在同名客户直接返回，不重复创建
+  const exist = s.customers.find(c => c.customer_name === customer.customer_name);
+  if (exist) return exist;
+  const c = { id: nanoid(10), region: '', customer_level: '', business_line: '', product_type: '', raw_known: {}, ...customer };
+  s.customers.push(c);
+  persist();
+  return c;
+}
 export function clearAll() {
   _state = structuredClone(DEFAULT);
   persist();

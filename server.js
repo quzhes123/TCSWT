@@ -2,6 +2,7 @@
 import 'dotenv/config';
 import path from 'node:path';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
@@ -24,9 +25,134 @@ fs.mkdirSync(EXPORT_DIR, { recursive: true });
 const PORT = parseInt(process.env.PORT || '8787', 10);
 const MAX_BATCH = parseInt(process.env.MAX_CUSTOMERS_PER_BATCH || '50', 10);
 
+// ============ 鉴权配置 ============
+const ADMIN_USER = process.env.ADMIN_USER || 'admin';
+const ADMIN_PASS = process.env.ADMIN_PASS || 'admin123';
+const SESSION_SECRET = process.env.SESSION_SECRET || 'tcswt-default-session-secret-please-override';
+const COOKIE_NAME = 'tcswt_session';
+const SESSION_TTL_DEFAULT = 12 * 60 * 60; // 12h
+const SESSION_TTL_REMEMBER = 7 * 24 * 60 * 60; // 7d
+
+function b64url(buf) {
+  return Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64urlDecode(str) {
+  const pad = str.length % 4 === 0 ? '' : '='.repeat(4 - (str.length % 4));
+  return Buffer.from(str.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64');
+}
+function signSession(payload) {
+  const body = b64url(JSON.stringify(payload));
+  const sig = b64url(crypto.createHmac('sha256', SESSION_SECRET).update(body).digest());
+  return `${body}.${sig}`;
+}
+function verifySession(token) {
+  if (!token || typeof token !== 'string') return null;
+  const idx = token.lastIndexOf('.');
+  if (idx < 0) return null;
+  const body = token.slice(0, idx);
+  const sig = token.slice(idx + 1);
+  const expected = b64url(crypto.createHmac('sha256', SESSION_SECRET).update(body).digest());
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+  let payload;
+  try { payload = JSON.parse(b64urlDecode(body).toString('utf8')); } catch { return null; }
+  if (!payload || typeof payload !== 'object') return null;
+  if (typeof payload.exp !== 'number' || payload.exp * 1000 < Date.now()) return null;
+  return payload;
+}
+function parseCookies(header) {
+  const out = {};
+  if (!header) return out;
+  for (const part of String(header).split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k) out[k] = decodeURIComponent(v);
+  }
+  return out;
+}
+function getSession(req) {
+  const cookies = parseCookies(req.headers.cookie || '');
+  return verifySession(cookies[COOKIE_NAME]);
+}
+function issueCookie(reply, payload, ttlSec) {
+  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  const token = signSession({ ...payload, exp });
+  const parts = [
+    `${COOKIE_NAME}=${token}`,
+    'Path=/',
+    'HttpOnly',
+    'SameSite=Lax',
+    `Max-Age=${ttlSec}`,
+    'Secure',
+  ];
+  reply.header('Set-Cookie', parts.join('; '));
+}
+function clearCookie(reply) {
+  reply.header('Set-Cookie', `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0; Secure`);
+}
+
+// 公共路径白名单（不需要登录）
+const PUBLIC_PATHS = new Set(['/login.html', '/api/login', '/api/logout', '/favicon.ico']);
+function isPublicAsset(url) {
+  // 允许登录页引用的本地静态资源（当前没有，但保留扩展位置）
+  return /\.(svg|png|jpe?g|webp|gif|ico|woff2?|css|map)$/i.test(url);
+}
+
 const app = Fastify({ logger: { level: 'info' }, bodyLimit: 30 * 1024 * 1024 });
 await app.register(multipart, { limits: { fileSize: 30 * 1024 * 1024 } });
+
+// ============ 鉴权前置钩子（必须在静态插件之前注册以拦截 / 与 /index.html）============
+app.addHook('onRequest', async (req, reply) => {
+  const rawUrl = req.url || '/';
+  const urlPath = rawUrl.split('?')[0];
+  if (PUBLIC_PATHS.has(urlPath) || isPublicAsset(urlPath)) return;
+  const session = getSession(req);
+  if (session) {
+    req.user = session;
+    return;
+  }
+  if (urlPath.startsWith('/api/')) {
+    return reply.code(401).send({ error: '未登录或会话已过期', code: 'UNAUTHENTICATED' });
+  }
+  // 页面跳转到登录页，并保留 next
+  const next = encodeURIComponent(rawUrl);
+  return reply.code(302).header('Location', `/login.html?next=${next}`).send();
+});
+
 await app.register(staticPlugin, { root: path.join(__dirname, 'public'), prefix: '/' });
+
+// ============ 鉴权 API ============
+app.post('/api/login', async (req, reply) => {
+  const { username, password, remember } = req.body || {};
+  const u = String(username || '').trim();
+  const p = String(password || '');
+  if (!u || !p) return reply.code(400).send({ ok: false, error: '请输入用户名和密码' });
+  // 等长比较防止时序攻击
+  const okUser = u.length === ADMIN_USER.length &&
+    crypto.timingSafeEqual(Buffer.from(u.padEnd(ADMIN_USER.length)), Buffer.from(ADMIN_USER.padEnd(ADMIN_USER.length)));
+  const okPass = p.length === ADMIN_PASS.length &&
+    crypto.timingSafeEqual(Buffer.from(p.padEnd(ADMIN_PASS.length)), Buffer.from(ADMIN_PASS.padEnd(ADMIN_PASS.length)));
+  if (!okUser || !okPass) {
+    await new Promise(r => setTimeout(r, 350)); // 轻量节流
+    return reply.code(401).send({ ok: false, error: '用户名或密码错误' });
+  }
+  const ttl = remember ? SESSION_TTL_REMEMBER : SESSION_TTL_DEFAULT;
+  issueCookie(reply, { u }, ttl);
+  return { ok: true, user: { name: u } };
+});
+
+app.post('/api/logout', async (req, reply) => {
+  clearCookie(reply);
+  return { ok: true };
+});
+
+app.get('/api/me', async (req, reply) => {
+  // 已经过 onRequest 鉴权，这里 req.user 一定存在
+  return { ok: true, user: { name: req.user?.u || ADMIN_USER } };
+});
 
 // ============ API: 元信息 ============
 app.get('/api/fields', async () => ({ fields: FIELDS }));
@@ -119,6 +245,20 @@ app.post('/api/research', async (req, reply) => {
   try {
     const job = startResearchJob({ customer_ids, fields, model });
     return { ok: true, job };
+  } catch (e) {
+    return reply.code(400).send({ error: String(e?.message || e) });
+  }
+});
+
+// ============ API: 按公司名手工快调 ============
+app.post('/api/research/by-name', async (req, reply) => {
+  const { name, fields, model } = req.body || {};
+  const customer_name = String(name || '').trim();
+  if (!customer_name) return reply.code(400).send({ error: '请填入公司名称' });
+  try {
+    const c = db.addCustomer({ customer_name, raw_known: { customer_name } });
+    const job = startResearchJob({ customer_ids: [c.id], fields, model });
+    return { ok: true, customer: c, job };
   } catch (e) {
     return reply.code(400).send({ error: String(e?.message || e) });
   }
