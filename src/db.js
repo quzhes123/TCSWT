@@ -329,16 +329,19 @@ export function recordModelTest(id, ok, errorMsg = '') {
   return publicModel(m);
 }
 
-/** 启动时自动迁移：db 中无任何 model 且 .env 配置了 ANTHROPIC_*，则建一条默认记录
- *  注意：之前老版本会把 Bearer key 写在 custom_headers.Authorization 明文存储，
- *  现在改成 auth_type=bearer + api_key（加密入库），自动 driver 会拼好 Authorization 头。
+/** 启动时自动迁移：仅当 db 中无任何 model 且 .env 配置了 ANTHROPIC_* 时，建一条默认记录。
+ *  云部署没有 .env 是常态——此时直接跳过，引导用户从「模型管理」页面手动新增即可。
+ *  设计原则：所有模型配置最终都应通过 UI 录入并加密落库，不依赖 .env 同步。
  */
 export function autoMigrateModels() {
   const s = load();
   if (s.models.length > 0) return null;
-  const url = process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com';
+  const url = process.env.ANTHROPIC_BASE_URL || '';
   const key = process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || '';
-  if (!key) return null;
+  if (!key || !url) {
+    console.log('[autoMigrate] 跳过（远程部署常态：无 .env 配置）。请到「模型管理」手动新增模型');
+    return null;
+  }
   const m = createModel({
     name: 'Claude Opus 4.8（默认）',
     identifier: process.env.ANTHROPIC_MODEL || 'claude-opus-4-8',
@@ -350,5 +353,6 @@ export function autoMigrateModels() {
     enabled: true,
     description: '系统首次启动从 .env 自动迁移',
   });
+  console.log('[autoMigrate] 已从 .env 创建默认 Anthropic 模型: ' + m.id);
   return m;
 }

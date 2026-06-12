@@ -1,36 +1,74 @@
 // AES-256-GCM 对称加密：用于持久化 API key
-// 加密 key 保存在 .env.local（不入 git）；首次启动若缺失自动生成
+// 加密 key 来源（按优先级）：
+//   1. process.env.MODEL_KEY_SECRET — 优先用环境变量（适合云部署/容器）
+//   2. data/.secret 文件 — 启动时若无此文件则生成；data 目录通常挂载持久卷
+//   .env.local 已废弃（不会随仓库同步,也不在持久化路径,容易导致 key 漂移）
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ENV_LOCAL = path.resolve(__dirname, '..', '.env.local');
+const SECRET_FILE = path.resolve(__dirname, '..', 'data', '.secret');
+// 兼容旧路径：若仍存在 .env.local 且环境变量没读到 key,从中迁移过来一次
+const LEGACY_ENV_LOCAL = path.resolve(__dirname, '..', '.env.local');
 
 const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;
 
 let _key = null;
 
-/** 取/造主密钥（32 字节）。从 process.env.MODEL_KEY_SECRET 读，缺则生成并写 .env.local */
+/** 取/造主密钥（32 字节）。优先级：env > data/.secret > 自动生成（写到 data/.secret） */
 export function getKey() {
   if (_key) return _key;
+
+  // 1. 环境变量
   const fromEnv = (process.env.MODEL_KEY_SECRET || '').trim();
   if (fromEnv) {
     const buf = decodeKeyString(fromEnv);
     if (buf && buf.length === 32) { _key = buf; return _key; }
   }
-  // 生成新 key 并写 .env.local（追加，不覆盖既有内容）
-  const buf = crypto.randomBytes(32);
-  const line = 'MODEL_KEY_SECRET=' + buf.toString('base64') + '\n';
-  let existing = '';
-  if (fs.existsSync(ENV_LOCAL)) existing = fs.readFileSync(ENV_LOCAL, 'utf8');
-  if (!/^MODEL_KEY_SECRET=/m.test(existing)) {
-    fs.writeFileSync(ENV_LOCAL, existing + (existing.endsWith('\n') || existing === '' ? '' : '\n') + line);
+
+  // 2. data/.secret 文件
+  if (fs.existsSync(SECRET_FILE)) {
+    try {
+      const content = fs.readFileSync(SECRET_FILE, 'utf8').trim();
+      const buf = decodeKeyString(content);
+      if (buf && buf.length === 32) {
+        _key = buf;
+        process.env.MODEL_KEY_SECRET = content;  // 同步到 env,其他子进程也能用
+        return _key;
+      }
+    } catch {}
   }
-  process.env.MODEL_KEY_SECRET = buf.toString('base64');
+
+  // 3. 兼容：从旧 .env.local 迁移
+  if (fs.existsSync(LEGACY_ENV_LOCAL)) {
+    try {
+      const content = fs.readFileSync(LEGACY_ENV_LOCAL, 'utf8');
+      const m = content.match(/^MODEL_KEY_SECRET=(.+)$/m);
+      if (m) {
+        const buf = decodeKeyString(m[1].trim());
+        if (buf && buf.length === 32) {
+          // 把 key 迁移到新位置
+          fs.mkdirSync(path.dirname(SECRET_FILE), { recursive: true });
+          fs.writeFileSync(SECRET_FILE, m[1].trim() + '\n', { mode: 0o600 });
+          _key = buf;
+          process.env.MODEL_KEY_SECRET = m[1].trim();
+          return _key;
+        }
+      }
+    } catch {}
+  }
+
+  // 4. 都没有：生成新 key 并写到 data/.secret（不写 .env.local）
+  const buf = crypto.randomBytes(32);
+  const b64 = buf.toString('base64');
+  fs.mkdirSync(path.dirname(SECRET_FILE), { recursive: true });
+  fs.writeFileSync(SECRET_FILE, b64 + '\n', { mode: 0o600 });
+  process.env.MODEL_KEY_SECRET = b64;
   _key = buf;
+  console.log('[crypto] 新生成加密主密钥 → ' + SECRET_FILE);
   return _key;
 }
 

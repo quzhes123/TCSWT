@@ -1,15 +1,8 @@
 // Fastify 服务入口
 import 'dotenv/config';
-// 显式加载 .env.local：放敏感本地配置（如 MODEL_KEY_SECRET 加密主密钥）
-// 必须在 dotenv/config 之后、其他模块之前；缺则 db.js 加密的 api_key 重启后解不开
-import dotenv from 'dotenv';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-const __envDirname = path.dirname(fileURLToPath(import.meta.url));
-const _envLocal = path.join(__envDirname, '.env.local');
-if (fs.existsSync(_envLocal)) dotenv.config({ path: _envLocal, override: true });
-
 import crypto from 'node:crypto';
 import Fastify from 'fastify';
 import multipart from '@fastify/multipart';
@@ -25,7 +18,7 @@ import { reloadRegistry } from './src/models/registry.js';
 import { AnthropicDriver } from './src/models/driver-anthropic.js';
 import { OpenAIDriver } from './src/models/driver-openai.js';
 
-const __dirname = __envDirname;
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
 const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 const EXPORT_DIR = path.join(DATA_DIR, 'exports');
