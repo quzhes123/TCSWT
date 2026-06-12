@@ -22,6 +22,18 @@
 </head>
 <body class="bg-[#f7f8fa] text-gray-800" x-data="modelsPage()" x-init="init()" x-cloak>
 
+  <!-- Alpine 初始化失败兜底提示(x-cloak 移除后仍可见说明 Alpine 挂了) -->
+  <noscript>
+    <div class="fixed inset-0 bg-red-500 text-white flex items-center justify-center z-[9999] text-lg font-semibold">
+      请启用 JavaScript 以使用模型管理功能
+    </div>
+  </noscript>
+  <div x-show="false" class="hidden" id="alpine-check" style="display:block !important;">
+    <div class="fixed top-0 left-0 right-0 bg-red-500 text-white px-6 py-3 text-center z-[9999]">
+      ⚠️ 页面初始化失败，请 <strong>Ctrl+Shift+R 强制刷新</strong> 或 <a href="/models.html" class="underline">点此重新加载</a>
+    </div>
+  </div>
+
   <!-- 顶部 -->
   <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
     <div class="flex items-center gap-3">
@@ -210,8 +222,11 @@ function modelsPage() {
       await this.load();
     },
     async load() {
-      try { this.models = await fetch('/api/models').then(r => r.json()); }
-      catch (e) { this.notify('加载失败:' + e, 'err'); }
+      try {
+        const r = await fetch('/api/models', { credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        this.models = await r.json();
+      } catch (e) { this.notify('加载失败:' + e, 'err'); }
     },
     notify(msg, type='info') {
       const t = { msg, type };
@@ -266,7 +281,8 @@ function modelsPage() {
       try {
         const url = this.editingId ? `/api/models/${this.editingId}` : '/api/models';
         const method = this.editingId ? 'PUT' : 'POST';
-        const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || '保存失败');
         this.notify(this.editingId ? '已更新' : '已新增', 'ok');
@@ -280,7 +296,8 @@ function modelsPage() {
     },
     async toggle(m) {
       try {
-        const r = await fetch(`/api/models/${m.id}/toggle`, { method: 'POST' });
+        const r = await fetch(`/api/models/${m.id}/toggle`, { method: 'POST', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
         if (!r.ok) throw new Error((await r.json()).error || 'toggle 失败');
         await this.load();
       } catch (e) { this.notify(String(e.message), 'err'); }
@@ -288,7 +305,8 @@ function modelsPage() {
     async del(m) {
       if (!confirm(`确认删除模型「${m.name}」?`)) return;
       try {
-        const r = await fetch(`/api/models/${m.id}`, { method: 'DELETE' });
+        const r = await fetch(`/api/models/${m.id}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
         if (!r.ok) throw new Error((await r.json()).error || '删除失败');
         this.notify('已删除', 'ok');
         await this.load();
@@ -297,15 +315,24 @@ function modelsPage() {
     async testOne(m) {
       this.testing[m.id] = true;
       try {
-        const r = await fetch(`/api/models/${m.id}/test`, { method: 'POST' });
-        const j = await r.json();
-        this.notify(j.ok ? `✓ ${m.name} 通过 (${j.latencyMs}ms)` : `✗ ${m.name}: ${j.error}`, j.ok ? 'ok' : 'err');
+        const r = await fetch(`/api/models/${m.id}/test`, { method: 'POST', credentials: 'same-origin' });
+        let j;
+        try { j = await r.json(); } catch { j = { ok: false, error: 'HTTP ' + r.status }; }
+        if (r.status === 401) {
+          this.notify('登录已失效，正在跳登录页', 'err');
+          setTimeout(() => location.replace('/login.html'), 800);
+          return;
+        }
+        this.notify(j.ok ? `✓ ${m.name} 通过 (${j.latencyMs}ms)` : `✗ ${m.name}: ${j.error || '失败'}`, j.ok ? 'ok' : 'err');
         await this.load();
-      } catch (e) { this.notify(String(e.message), 'err'); }
-      finally { this.testing[m.id] = false; }
+      } catch (e) {
+        this.notify('测试失败: ' + (e?.message || e), 'err');
+      } finally {
+        this.testing[m.id] = false;
+      }
     },
     async logout() {
-      try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+      try { await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' }); } catch {}
       location.replace('/login.html');
     },
   };
