@@ -272,12 +272,21 @@ app.get('/api/jobs/:id', async (req, reply) => {
 
 app.get('/api/jobs', async () => db.listJobs());
 
-// ============ API: 导出 V2 ============
+// ============ API: 批量导出 V2 ============
+// ?ids=id1,id2  → 仅导这些客户；不传 → 导出全部
 app.get('/api/export/v2.xlsx', async (req, reply) => {
-  const customers = db.listCustomers().map(c => db.buildCustomerReport(c.id));
+  const idsParam = (req.query?.ids || '').toString().trim();
+  const ids = idsParam ? idsParam.split(',').map(s => s.trim()).filter(Boolean) : null;
+  const list = ids ? ids.map(id => db.getCustomer(id)).filter(Boolean) : db.listCustomers();
+  if (list.length === 0) return reply.code(400).send({ error: ids ? '所选客户不存在' : '暂无客户可导出' });
+  const customers = list.map(c => db.buildCustomerReport(c.id));
   const out = path.join(EXPORT_DIR, `V2-${Date.now()}.xlsx`);
   await exportV2(out, customers);
-  reply.header('Content-Disposition', `attachment; filename="V2-${Date.now()}.xlsx"`);
+  // ASCII 文件名 + RFC 5987 中文文件名（区分全量/选中）
+  const ts = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+  const ascii = `V2-${ts}.xlsx`;
+  const zh = ids ? `批量调研报告-${list.length}个客户-${ts}.xlsx` : `客户调研总表-${ts}.xlsx`;
+  reply.header('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(zh)}`);
   reply.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   return fs.createReadStream(out);
 });
