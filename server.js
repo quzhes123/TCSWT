@@ -282,6 +282,21 @@ app.get('/api/export/v2.xlsx', async (req, reply) => {
   return fs.createReadStream(out);
 });
 
+// ============ API: 导出单客户报告 ============
+app.get('/api/customers/:id/export.xlsx', async (req, reply) => {
+  const report = db.buildCustomerReport(req.params.id);
+  if (!report) return reply.code(404).send({ error: '客户不存在' });
+  const safeName = String(report.customer?.customer_name || 'customer').replace(/[\\\/:*?"<>|]/g, '_').slice(0, 40);
+  const out = path.join(EXPORT_DIR, `report-${safeName}-${Date.now()}.xlsx`);
+  await exportV2(out, [report]);
+  // 用 RFC 5987 编码非 ASCII 文件名（含中文公司名时浏览器才能正确显示）
+  const ascii = 'report.xlsx';
+  const encoded = encodeURIComponent(`${safeName}-调研报告.xlsx`);
+  reply.header('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`);
+  reply.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  return fs.createReadStream(out);
+});
+
 // ============ 启动 ============
 try {
   await app.listen({ port: PORT, host: '0.0.0.0' });

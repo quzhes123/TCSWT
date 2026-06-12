@@ -97,14 +97,10 @@
 
       <!-- 导航 -->
       <nav class="flex-1 py-3 overflow-y-auto">
-        <div class="px-5 pb-2 pt-1 text-[11px] font-semibold text-gray-400 tracking-wider">智能调研</div>
-        <div class="nav-item" :class="{'active': tab==='workspace' && inputMode==='name'}" @click="tab='workspace'; inputMode='name'; mobileNav=false">
-          <i class="fas fa-building"></i>
-          <div class="flex-1">按公司名称调研</div>
-        </div>
-        <div class="nav-item" :class="{'active': tab==='workspace' && inputMode==='file'}" @click="tab='workspace'; inputMode='file'; mobileNav=false">
-          <i class="fas fa-file-excel"></i>
-          <div class="flex-1">按表格内容调研</div>
+        <div class="px-5 pb-2 pt-1 text-[11px] font-semibold text-gray-400 tracking-wider">工作区</div>
+        <div class="nav-item" :class="{'active': tab==='workspace'}" @click="tab='workspace'; mobileNav=false">
+          <i class="fas fa-wand-magic-sparkles"></i>
+          <div class="flex-1">智能调研</div>
         </div>
         <div class="px-5 pb-2 pt-4 text-[11px] font-semibold text-gray-400 tracking-wider">客户</div>
         <div class="nav-item" :class="{'active': tab==='customers'}" @click="tab='customers'; loadAll(); mobileNav=false">
@@ -150,7 +146,7 @@
           <button class="md:hidden text-gray-600 hover:text-gray-900 -ml-1 p-1" @click="mobileNav=true" aria-label="打开菜单">
             <i class="fas fa-bars text-lg"></i>
           </button>
-          <h1 class="page-title truncate" x-text="tab==='workspace' ? (inputMode==='name'?'按公司名称调研':'按表格内容调研') : (tab==='customers' ? '客户与看板' : '导出调研报告')"></h1>
+          <h1 class="page-title truncate" x-text="tab==='workspace' ? '智能调研工作台' : (tab==='customers' ? '客户与看板' : '导出调研报告')"></h1>
         </div>
         <div class="flex items-center gap-3 flex-shrink-0">
           <span class="tag" :class="health.search?.enabled ? 'tag-green' : 'tag-amber'" x-show="health.model">
@@ -177,43 +173,64 @@
     <!-- ============ Tab 1: 调研工作台 ============ -->
     <section x-show="tab==='workspace'" class="space-y-4">
 
-      <div class="card p-4 md:p-5">
-        <h2 class="text-base font-semibold mb-3">
-          <i class="fas mr-1 text-[#165DFF]" :class="inputMode==='name' ? 'fa-building' : 'fa-file-excel'"></i>
-          <span x-text="inputMode==='name' ? '1. 输入公司名称' : '1. 上传客户信息表'"></span>
-        </h2>
+      <div class="card overflow-hidden">
+        <div class="flex flex-col md:flex-row min-h-[200px]">
+          <!-- 左侧垂直 tab -->
+          <div class="w-full md:w-44 flex-shrink-0 bg-gray-50 border-b md:border-b-0 md:border-r border-gray-100 p-2 md:p-3 flex md:flex-col gap-1">
+            <button class="flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition text-left"
+                    :class="inputMode==='name' ? 'bg-white text-[#165DFF] font-semibold shadow-sm border border-blue-100' : 'text-gray-600 hover:bg-white/70'"
+                    @click="inputMode='name'">
+              <i class="fas fa-building w-4 text-center"></i>
+              <span>按公司名称调研</span>
+            </button>
+            <button class="flex-1 md:flex-none flex items-center gap-2.5 px-3 py-2.5 rounded-lg text-sm transition text-left"
+                    :class="inputMode==='file' ? 'bg-white text-[#165DFF] font-semibold shadow-sm border border-blue-100' : 'text-gray-600 hover:bg-white/70'"
+                    @click="inputMode='file'">
+              <i class="fas fa-file-excel w-4 text-center"></i>
+              <span>按表格内容调研</span>
+            </button>
+          </div>
 
-        <!-- 模式 A: 上传 xlsx -->
-        <div x-show="inputMode==='file'" class="grid md:grid-cols-3 gap-4 items-center">
-          <label class="md:col-span-2 border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center hover:border-[#165DFF] transition-colors cursor-pointer block">
-            <i class="fas fa-cloud-arrow-up text-3xl text-[#165DFF]"></i>
-            <div class="mt-2 text-sm text-gray-600">点击或拖拽上传 <span class="font-medium">客户信息表（.xlsx）</span></div>
-            <div class="text-xs text-gray-400 mt-1">参考 V1.xlsx 模板，自动识别全部 32 个字段表头</div>
-            <input type="file" accept=".xlsx" class="hidden" @change="upload($event)">
-          </label>
-          <div class="rounded-lg border px-4 py-3" :class="parseRes ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'">
-            <template x-if="!parseRes">
-              <div class="text-sm text-gray-400"><i class="fas fa-circle-info mr-1"></i> 等待上传...</div>
-            </template>
-            <template x-if="parseRes">
-              <div>
-                <div class="text-green-700 text-sm font-semibold flex items-center gap-1"><i class="fas fa-circle-check"></i> 文件已解析</div>
-                <div class="text-xs text-gray-700 mt-1.5">共识别 <b x-text="parseRes.customer_count"></b> 条客户记录，<b x-text="parseRes.field_count"></b> 个字段。</div>
-                <div class="text-[11px] text-gray-400 mt-1">已知字段将作为基准上下文</div>
+          <!-- 右侧内容区 -->
+          <div class="flex-1 p-4 md:p-5 min-w-0">
+            <h2 class="text-base font-semibold mb-3">
+              <span class="text-gray-400 mr-1">1.</span>
+              <span x-text="inputMode==='name' ? '输入公司名称' : '上传客户信息表'"></span>
+            </h2>
+
+            <!-- 模式 A: 上传 xlsx -->
+            <div x-show="inputMode==='file'" class="grid md:grid-cols-3 gap-4 items-center">
+              <label class="md:col-span-2 border-2 border-dashed border-gray-300 rounded-lg px-4 py-6 text-center hover:border-[#165DFF] transition-colors cursor-pointer block">
+                <i class="fas fa-cloud-arrow-up text-3xl text-[#165DFF]"></i>
+                <div class="mt-2 text-sm text-gray-600">点击或拖拽上传 <span class="font-medium">客户信息表（.xlsx）</span></div>
+                <div class="text-xs text-gray-400 mt-1">参考 V1.xlsx 模板，自动识别全部 32 个字段表头</div>
+                <input type="file" accept=".xlsx" class="hidden" @change="upload($event)">
+              </label>
+              <div class="rounded-lg border px-4 py-3" :class="parseRes ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'">
+                <template x-if="!parseRes">
+                  <div class="text-sm text-gray-400"><i class="fas fa-circle-info mr-1"></i> 等待上传...</div>
+                </template>
+                <template x-if="parseRes">
+                  <div>
+                    <div class="text-green-700 text-sm font-semibold flex items-center gap-1"><i class="fas fa-circle-check"></i> 文件已解析</div>
+                    <div class="text-xs text-gray-700 mt-1.5">共识别 <b x-text="parseRes.customer_count"></b> 条客户记录，<b x-text="parseRes.field_count"></b> 个字段。</div>
+                    <div class="text-[11px] text-gray-400 mt-1">已知字段将作为基准上下文</div>
+                  </div>
+                </template>
               </div>
-            </template>
-          </div>
-        </div>
+            </div>
 
-        <!-- 模式 B: 公司名称（仅输入名称，无范围选择、无独立按钮，统一走下方流程）-->
-        <div x-show="inputMode==='name'">
-          <div class="relative">
-            <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-            <input type="text" x-model="companyName"
-                   placeholder="输入公司全称，如：杭州某某金融服务有限公司"
-                   class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+            <!-- 模式 B: 公司名称 -->
+            <div x-show="inputMode==='name'">
+              <div class="relative">
+                <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                <input type="text" x-model="companyName"
+                       placeholder="输入公司全称，如：杭州某某金融服务有限公司"
+                       class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+              </div>
+              <div class="text-[11px] text-gray-500 mt-2">系统将新建一条客户记录，按下方所选<b>模型</b>与<b>字段范围</b>联网调研补全（含来源标注）。</div>
+            </div>
           </div>
-          <div class="text-[11px] text-gray-500 mt-2">系统将新建一条客户记录，按下方所选<b>模型</b>与<b>字段范围</b>联网调研补全（含来源标注）。</div>
         </div>
       </div>
 
@@ -384,8 +401,9 @@
                     <template x-if="!c._stat?.nConflict && c._stat?.nFilled > 0"><span class="tag tag-green"><i class="fas fa-check mr-1"></i>已补充</span></template>
                     <template x-if="!c._stat?.nFilled && !c._stat?.nConflict"><span class="tag tag-amber"><i class="fas fa-spinner mr-1"></i>待调研</span></template>
                   </td>
-                  <td class="px-4 py-3 text-center cell-action">
-                    <button class="text-[#165DFF] hover:underline text-sm font-medium" @click.stop="openReport(c.id)"><i class="fas fa-file-lines mr-1"></i>查看报告</button>
+                  <td class="px-4 py-3 text-center cell-action whitespace-nowrap">
+                    <button class="text-[#165DFF] hover:underline text-sm font-medium mr-3" @click.stop="openReport(c.id)" title="查看报告"><i class="fas fa-file-lines mr-1"></i>查看</button>
+                    <a class="text-[#165DFF] hover:underline text-sm font-medium" :href="`/api/customers/${c.id}/export.xlsx`" target="_blank" @click.stop title="导出该客户的调研报告 Excel"><i class="fas fa-download mr-1"></i>导出</a>
                   </td>
                 </tr>
               </template>
