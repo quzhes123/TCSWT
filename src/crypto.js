@@ -1,79 +1,38 @@
 // AES-256-GCM 对称加密：用于持久化 API key
-// 加密 key 来源（按优先级）：
-//   1. process.env.MODEL_KEY_SECRET — 优先用环境变量（适合云部署/容器）
-//   2. data/.secret 文件 — 启动时若无此文件则生成；data 目录通常挂载持久卷
-//   .env.local 已废弃（不会随仓库同步,也不在持久化路径,容易导致 key 漂移）
+// 设计目标：「页面配置即用」—— 不需要管理外部密钥文件,跨环境/重启零运维。
+// 主密钥来源（按优先级）：
+//   1. process.env.MODEL_KEY_SECRET — 高安全部署可选,显式指定主密钥
+//   2. 代码内常量派生 — 默认。SHA-256 派生一个固定密钥,所有环境一致,db.json 跨机器可解
+//
+// 注意：方式 2 的安全性等价于"db.json 文件本身的访问控制"——
+//   - db.json 不入 git(.gitignore 已配)
+//   - 不应公开发布 db.json 文件
+//   - API 列表/详情接口绝不回传 api_key 字段(maskHeaders 已处理)
+//   生产环境若有更高安全要求,设 MODEL_KEY_SECRET 环境变量即可。
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const SECRET_FILE = path.resolve(__dirname, '..', 'data', '.secret');
-// 兼容旧路径：若仍存在 .env.local 且环境变量没读到 key,从中迁移过来一次
-const LEGACY_ENV_LOCAL = path.resolve(__dirname, '..', '.env.local');
+// 内置派生根：固定字符串。修改它会让历史所有 db.json 解密失败,谨慎。
+const _BUILT_IN = 'tcswt::shangwutong::default-mk::v1';
 
 const ALGO = 'aes-256-gcm';
 const IV_LEN = 12;
 
 let _key = null;
 
-/** 取/造主密钥（32 字节）。优先级：env > data/.secret > 自动生成（写到 data/.secret） */
+/** 取主密钥（32 字节）。优先 env，否则用代码常量派生。 */
 export function getKey() {
   if (_key) return _key;
-
-  // 1. 环境变量
   const fromEnv = (process.env.MODEL_KEY_SECRET || '').trim();
   if (fromEnv) {
     const buf = decodeKeyString(fromEnv);
     if (buf && buf.length === 32) { _key = buf; return _key; }
   }
-
-  // 2. data/.secret 文件
-  if (fs.existsSync(SECRET_FILE)) {
-    try {
-      const content = fs.readFileSync(SECRET_FILE, 'utf8').trim();
-      const buf = decodeKeyString(content);
-      if (buf && buf.length === 32) {
-        _key = buf;
-        process.env.MODEL_KEY_SECRET = content;  // 同步到 env,其他子进程也能用
-        return _key;
-      }
-    } catch {}
-  }
-
-  // 3. 兼容：从旧 .env.local 迁移
-  if (fs.existsSync(LEGACY_ENV_LOCAL)) {
-    try {
-      const content = fs.readFileSync(LEGACY_ENV_LOCAL, 'utf8');
-      const m = content.match(/^MODEL_KEY_SECRET=(.+)$/m);
-      if (m) {
-        const buf = decodeKeyString(m[1].trim());
-        if (buf && buf.length === 32) {
-          // 把 key 迁移到新位置
-          fs.mkdirSync(path.dirname(SECRET_FILE), { recursive: true });
-          fs.writeFileSync(SECRET_FILE, m[1].trim() + '\n', { mode: 0o600 });
-          _key = buf;
-          process.env.MODEL_KEY_SECRET = m[1].trim();
-          return _key;
-        }
-      }
-    } catch {}
-  }
-
-  // 4. 都没有：生成新 key 并写到 data/.secret（不写 .env.local）
-  const buf = crypto.randomBytes(32);
-  const b64 = buf.toString('base64');
-  fs.mkdirSync(path.dirname(SECRET_FILE), { recursive: true });
-  fs.writeFileSync(SECRET_FILE, b64 + '\n', { mode: 0o600 });
-  process.env.MODEL_KEY_SECRET = b64;
-  _key = buf;
-  console.log('[crypto] 新生成加密主密钥 → ' + SECRET_FILE);
+  // 派生：SHA-256 把固定字符串映射成 32 字节
+  _key = crypto.createHash('sha256').update(_BUILT_IN).digest();
   return _key;
 }
 
 function decodeKeyString(s) {
-  // 支持 base64 或 hex
   try {
     const b = Buffer.from(s, 'base64');
     if (b.length === 32) return b;
