@@ -108,6 +108,11 @@
           <div class="flex-1">客户看板</div>
           <span class="tag tag-gray !px-1.5 !py-0 text-[10px]" x-show="stats.total" x-text="stats.total"></span>
         </div>
+        <div class="px-5 pb-2 pt-4 text-[11px] font-semibold text-gray-400 tracking-wider">系统</div>
+        <a href="/models.html" class="nav-item" style="text-decoration:none; color:inherit;">
+          <i class="fas fa-microchip"></i>
+          <div class="flex-1">模型管理</div>
+        </a>
       </nav>
 
       <!-- 底部状态 -->
@@ -213,13 +218,22 @@
       </div>
 
       <div class="card p-4 md:p-5">
-        <h2 class="text-base font-semibold mb-3"><i class="fas fa-microchip text-[#165DFF] mr-1"></i>2. 选择调研模型</h2>
-        <div class="flex flex-wrap gap-2 mb-3">
-          <template x-for="m in modelOptions" :key="m">
-            <button class="px-3 py-1.5 rounded-lg text-sm border transition"
-                    :class="model===m ? 'bg-[#165DFF] text-white border-[#165DFF] shadow' : 'bg-white text-gray-600 border-gray-300 hover:border-[#165DFF]'"
-                    @click="model=m" x-text="m"></button>
+        <h2 class="text-base font-semibold mb-3"><i class="fas fa-microchip text-[#165DFF] mr-1"></i>2. 选择调研模型（可多选）</h2>
+        <div class="text-xs text-gray-500 mb-2">同一字段多个模型并发调研，自动合并一致结果或标注冲突</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+          <template x-for="m in availableModels" :key="m.id">
+            <label class="flex items-center gap-2 px-3 py-2 border rounded cursor-pointer hover:bg-blue-50 transition"
+                   :class="selectedModels.includes(m.id) ? 'bg-blue-50 border-[#165DFF]' : 'bg-white border-gray-200'">
+              <input type="checkbox" :value="m.id" x-model="selectedModels" class="rounded text-[#165DFF]">
+              <div class="flex-1">
+                <div class="text-sm font-medium" x-text="m.name"></div>
+                <div class="text-xs text-gray-400" x-text="m.identifier"></div>
+              </div>
+            </label>
           </template>
+          <div x-show="!availableModels.length" class="col-span-2 text-sm text-gray-400 py-4 text-center">
+            无可用模型。请到「模型管理」添加配置。
+          </div>
         </div>
         <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
           <i class="fas fa-circle-info mr-1"></i> 系统会基于已知字段做<strong>一致性校验</strong>，对空字段做<strong>主动调研补全</strong>，并强制要求模型给出可追溯的来源 URL。
@@ -474,6 +488,13 @@
                   <div class="font-medium" x-text="f.r?.value || '—'"></div>
                 </template>
                 <div class="text-[11px] text-gray-500 mt-1" x-text="f.r?.reason || ''"></div>
+                <!-- 模型一致性 -->
+                <template x-if="f.r?.model_summary">
+                  <div class="text-[10px] text-gray-400 mt-0.5 border-t border-gray-200 pt-1"
+                       :title="'原始模型输出:\n' + (f.r?.raw_results||[]).map(rr => rr.model + ': ' + (rr.value || 'unknown')).join('\n')">
+                    <i class="fas fa-microchip mr-1"></i><span x-text="f.r.model_summary"></span>
+                  </div>
+                </template>
                 <template x-if="f.r?.sources?.length">
                   <div class="mt-1 space-y-1">
                     <template x-for="s in f.r.sources" :key="s.url">
@@ -503,6 +524,8 @@ function app() {
     selectedFields: [],
     modelOptions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     model: 'claude-opus-4-8',
+    availableModels: [],   // 来自 /api/models?enabled=1
+    selectedModels: [],    // 用户勾选的模型 id
     parseRes: null,
 
     // 输入模式：name = 按公司名称；file = 按表格内容
@@ -526,15 +549,23 @@ function app() {
     },
 
     async init() {
-      const [hf, ff, mf] = await Promise.all([
+      const [hf, ff, mf, mm] = await Promise.all([
         fetch('/api/health').then(r => r.json()).catch(() => ({})),
         fetch('/api/fields').then(r => r.json()).catch(() => ({ fields: [] })),
         fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/models?enabled=1').then(r => r.json()).catch(() => []),
       ]);
       this.health = hf;
       this.fields = ff.fields || [];
       this.me = mf?.user || null;
+      this.availableModels = Array.isArray(mm) ? mm : [];
+      // 默认全选所有可用模型
+      this.selectedModels = this.availableModels.map(m => m.id);
       await this.loadAll();
+    },
+
+    async refreshModels() {
+      this.availableModels = await fetch('/api/models?enabled=1').then(r => r.json()).catch(() => []);
     },
 
     async logout() {
@@ -569,18 +600,21 @@ function app() {
       if (!this.canResearch || this.job?.status === 'running') return;
       this.researchError = '';
       const fieldsBody = this.selectedFields.length ? this.selectedFields : undefined;
+      const modelsBody = this.selectedModels.length ? this.selectedModels : undefined;
       try {
         let j;
         if (this.inputMode === 'name') {
           const name = this.companyName.trim();
-          const body = { name, model: this.model };
+          const body = { name };
+          if (modelsBody) body.models = modelsBody;
           if (fieldsBody) body.fields = fieldsBody;
           const r = await fetch('/api/research/by-name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
           j = await r.json();
           if (!r.ok) throw new Error(j.error || '触发失败');
           this.lastReportCustomerId = j.customer?.id || null;
         } else {
-          const body = { model: this.model };
+          const body = {};
+          if (modelsBody) body.models = modelsBody;
           if (fieldsBody) body.fields = fieldsBody;
           const r = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
           j = await r.json();
@@ -612,6 +646,7 @@ function app() {
     },
 
     get canResearch() {
+      if (!this.selectedModels.length) return false;
       return this.inputMode === 'name' ? !!this.companyName.trim() : !!this.parseRes;
     },
     get researchTargetDesc() {

@@ -1,8 +1,10 @@
-// 任务调度：用 p-limit 控制并发，按字段调用 researchField 并把结果落 db.
+// 任务调度：用 p-limit 控制并发，按字段 fan-out 多模型调用 researchField 并合并结果落 db.
 import pLimit from 'p-limit';
-import { researchField, DEFAULT_MODEL } from './researcher.js';
+import { researchField } from './researcher.js';
 import { FIELDS, NO_RESEARCH_FIELDS } from './field-spec.js';
 import * as db from './db.js';
+import { getDriver } from './models/registry.js';
+import { mergeMultiModel } from './merger.js';
 
 const FIELD_CONCURRENCY = parseInt(process.env.FIELD_CONCURRENCY || '4', 10);
 const LABEL_OF = Object.fromEntries(FIELDS.map(f => [f.key, f.label]));
@@ -12,9 +14,9 @@ const LABEL_OF = Object.fromEntries(FIELDS.map(f => [f.key, f.label]));
  * @param {object} args
  * @param {string[]} [args.customer_ids] - 默认全部客户
  * @param {string[]} [args.fields]       - 默认全部 32 字段（去掉 NO_RESEARCH_FIELDS）
- * @param {string}   [args.model]        - claude-opus-4-8 / claude-sonnet-4-6 / ...
+ * @param {string[]} [args.models]       - 模型 id 数组（多模型并行）；缺省时取全部已启用模型
  */
-export function startResearchJob({ customer_ids, fields, model } = {}) {
+export function startResearchJob({ customer_ids, fields, models } = {}) {
   const customers = (customer_ids?.length
     ? customer_ids.map(id => db.getCustomer(id)).filter(Boolean)
     : db.listCustomers()
@@ -24,8 +26,12 @@ export function startResearchJob({ customer_ids, fields, model } = {}) {
   const targetFields = (fields && fields.length ? fields : FIELDS.map(f => f.key))
     .filter(k => !NO_RESEARCH_FIELDS.has(k));
 
+  // 模型列表：前端传 models 数组（可多选），或默认取全部已启用
+  let modelIds = models && models.length ? models : db.listModels({ enabledOnly: true }).map(m => m.id);
+  if (!modelIds.length) throw new Error('没有已启用的模型，请到「模型管理」配置');
+
   const job = db.createJob({
-    model: model || DEFAULT_MODEL,
+    models: modelIds,   // 替代旧的单 model 字段
     customer_ids: customers.map(c => c.id),
     fields: targetFields,
     status: 'running',
@@ -34,19 +40,23 @@ export function startResearchJob({ customer_ids, fields, model } = {}) {
   });
 
   // 异步执行（不 await）
-  runJob(job.id, customers, targetFields, model || DEFAULT_MODEL).catch(err => {
+  runJob(job.id, customers, targetFields, modelIds).catch(err => {
     db.updateJob(job.id, { status: 'failed', error: String(err?.message || err), finished_at: Date.now() });
   });
 
   return job;
 }
 
-async function runJob(jobId, customers, fields, model) {
+async function runJob(jobId, customers, fields, modelIds) {
   const limit = pLimit(FIELD_CONCURRENCY);
   const total = customers.length * fields.length;
   const multi = customers.length > 1;
   const steps = [];
   let done = 0;
+
+  // 提前拿到所有 driver 实例（避免内循环重复查）
+  const drivers = modelIds.map(id => getDriver(id)).filter(Boolean);
+  if (!drivers.length) throw new Error('所选模型全部无效/未加载');
 
   const tasks = [];
   for (const customer of customers) {
@@ -54,16 +64,66 @@ async function runJob(jobId, customers, fields, model) {
       tasks.push(limit(async () => {
         let stepStatus = 'unknown', stepValue = '';
         try {
-          const { result, sources } = await researchField({ customer, fieldKey: field, model });
-          db.saveResult({ job_id: jobId, customer_id: customer.id, field, ...result }, sources);
-          stepStatus = result.status || 'unknown';
-          stepValue = result.status === 'conflict'
-            ? (result.values || []).filter(Boolean).join(' / ')
-            : (result.value || '');
+          // fan-out：并发跨 N 个模型调研同一字段
+          const rawResults = await Promise.all(
+            drivers.map(async (driver) => {
+              try {
+                const { result, sources } = await researchField({ customer, fieldKey: field, driver });
+                // 原始结果落库（中间产物，需求 §3.1）
+                db.saveResult({ job_id: jobId, customer_id: customer.id, field, model: driver.id, ...result }, sources);
+                return {
+                  modelId: driver.id,
+                  modelName: driver.displayName,
+                  status: result.status || 'unknown',
+                  value: result.value || '',
+                  reason: result.reason || '',
+                  confidence: result.confidence,
+                  sources: sources || [],
+                };
+              } catch (e) {
+                // 单个模型失败不阻塞其他模型
+                db.saveResult({
+                  job_id: jobId, customer_id: customer.id, field, model: driver.id,
+                  status: 'unknown', reason: '执行异常：' + (e?.message || e),
+                }, []);
+                return { modelId: driver.id, modelName: driver.displayName, status: 'unknown', value: '', sources: [] };
+              }
+            })
+          );
+
+          // 合并多模型结果（已知值作为虚拟模型参与）
+          const merged = mergeMultiModel({
+            fieldKey: field,
+            knownValue: customer.raw_known?.[field] || null,
+            modelResults: rawResults,
+          });
+
+          // 合并结论落库（is_merged=true，关联原始 result ids）
+          const rawIds = db.listResults({ job_id: jobId, customer_id: customer.id, field }).map(r => r.id);
+          db.saveResult({
+            job_id: jobId,
+            customer_id: customer.id,
+            field,
+            model: null,          // 合并结论无单一 model
+            is_merged: true,
+            raw_result_ids: rawIds,
+            status: merged.status,
+            value: merged.value,
+            values: merged.values || null,
+            reason: merged.reason,
+            model_summary: merged.model_summary,
+            confidence: null,
+          }, merged.sources || []);
+
+          stepStatus = merged.status;
+          stepValue = merged.status === 'conflict'
+            ? (merged.values || []).filter(Boolean).join(' / ')
+            : (merged.value || '');
         } catch (e) {
+          // 整个字段失败（极少见，合并逻辑本身错）
           db.saveResult({
             job_id: jobId, customer_id: customer.id, field,
-            status: 'unknown', reason: '执行异常：' + (e?.message || e), model,
+            status: 'unknown', reason: '合并失败：' + (e?.message || e),
           }, []);
           stepStatus = 'error';
         } finally {
@@ -73,7 +133,6 @@ async function runJob(jobId, customers, fields, model) {
             status: stepStatus,
             value: String(stepValue || '').replace(/\s+/g, ' ').slice(0, 60),
           });
-          // 每步都写：并发 4 + 每步是一次 LLM 调用，写入频率可控
           db.updateJob(jobId, { progress: { done, total }, steps: steps.slice(-80) });
         }
       }));
@@ -87,3 +146,4 @@ async function runJob(jobId, customers, fields, model) {
     finished_at: Date.now(),
   });
 }
+

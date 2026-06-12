@@ -14,6 +14,9 @@ import * as db from './src/db.js';
 import { startResearchJob } from './src/jobs.js';
 import { FIELDS, FIELD_BY_KEY } from './src/field-spec.js';
 import { SEARCH_ENABLED, PROVIDER as SEARCH_PROVIDER } from './src/serp.js';
+import { reloadRegistry } from './src/models/registry.js';
+import { AnthropicDriver } from './src/models/driver-anthropic.js';
+import { OpenAIDriver } from './src/models/driver-openai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, 'data');
@@ -241,9 +244,9 @@ app.get('/api/stats', async () => db.computeStats());
 
 // ============ API: 调研任务 ============
 app.post('/api/research', async (req, reply) => {
-  const { customer_ids, fields, model } = req.body || {};
+  const { customer_ids, fields, models } = req.body || {};
   try {
-    const job = startResearchJob({ customer_ids, fields, model });
+    const job = startResearchJob({ customer_ids, fields, models });
     return { ok: true, job };
   } catch (e) {
     return reply.code(400).send({ error: String(e?.message || e) });
@@ -252,12 +255,12 @@ app.post('/api/research', async (req, reply) => {
 
 // ============ API: 按公司名手工快调 ============
 app.post('/api/research/by-name', async (req, reply) => {
-  const { name, fields, model } = req.body || {};
+  const { name, fields, models } = req.body || {};
   const customer_name = String(name || '').trim();
   if (!customer_name) return reply.code(400).send({ error: '请填入公司名称' });
   try {
     const c = db.addCustomer({ customer_name, raw_known: { customer_name } });
-    const job = startResearchJob({ customer_ids: [c.id], fields, model });
+    const job = startResearchJob({ customer_ids: [c.id], fields, models });
     return { ok: true, customer: c, job };
   } catch (e) {
     return reply.code(400).send({ error: String(e?.message || e) });
@@ -306,8 +309,73 @@ app.get('/api/customers/:id/export.xlsx', async (req, reply) => {
   return fs.createReadStream(out);
 });
 
+// ============ API: 模型配置管理 ============
+function pickModelInput(body) {
+  // 显式列字段防止前端塞奇怪东西到 db
+  const out = {};
+  ['name','identifier','provider','version','description','api_url','auth_type',
+   'api_key','custom_headers','timeout','max_retries','concurrency','request_template','response_path','enabled']
+   .forEach(k => { if (body && k in body) out[k] = body[k]; });
+  return out;
+}
+
+app.get('/api/models', async (req) => {
+  const enabledOnly = req.query?.enabled === '1' || req.query?.enabled === 'true';
+  return db.listModels({ enabledOnly });
+});
+
+app.get('/api/models/:id', async (req, reply) => {
+  const m = db.getModel(req.params.id);
+  if (!m) return reply.code(404).send({ error: '模型不存在' });
+  return m;
+});
+
+app.post('/api/models', async (req, reply) => {
+  const input = pickModelInput(req.body);
+  if (!input.name || !input.api_url) return reply.code(400).send({ error: '名称和 API URL 必填' });
+  const m = db.createModel(input);
+  reloadRegistry();
+  return { ok: true, model: m };
+});
+
+app.put('/api/models/:id', async (req, reply) => {
+  const input = pickModelInput(req.body);
+  const m = db.updateModel(req.params.id, input);
+  if (!m) return reply.code(404).send({ error: '模型不存在' });
+  reloadRegistry();
+  return { ok: true, model: m };
+});
+
+app.delete('/api/models/:id', async (req, reply) => {
+  const ok = db.deleteModel(req.params.id);
+  if (!ok) return reply.code(404).send({ error: '模型不存在' });
+  reloadRegistry();
+  return { ok: true };
+});
+
+app.post('/api/models/:id/toggle', async (req, reply) => {
+  const m = db.getModel(req.params.id);
+  if (!m) return reply.code(404).send({ error: '模型不存在' });
+  const updated = db.updateModel(req.params.id, { enabled: !m.enabled });
+  reloadRegistry();
+  return { ok: true, model: updated };
+});
+
+// 连通性测试：用 driver.ping() 探活，记录到 last_test_*
+app.post('/api/models/:id/test', async (req, reply) => {
+  const full = db.getModelWithSecret(req.params.id);
+  if (!full) return reply.code(404).send({ error: '模型不存在' });
+  const Cls = full.provider === 'anthropic' ? AnthropicDriver : OpenAIDriver;
+  const driver = new Cls(full);
+  const r = await driver.ping();
+  db.recordModelTest(req.params.id, r.ok, r.error || '');
+  return { ok: r.ok, latencyMs: r.latencyMs, sample: r.sample || '', error: r.error || '' };
+});
+
 // ============ 启动 ============
 try {
+  db.autoMigrateModels();  // 首次启动从 .env 迁移 Anthropic 配置
+  reloadRegistry();         // 加载已启用的模型驱动
   await app.listen({ port: PORT, host: '0.0.0.0' });
   console.log(`\n  ✅ 商务通调研系统已启动：http://localhost:${PORT}`);
   console.log(`     模型：${process.env.ANTHROPIC_MODEL || 'claude-opus-4-8'}`);

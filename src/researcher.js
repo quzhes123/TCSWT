@@ -1,28 +1,14 @@
-// 调研引擎：Claude + 受控搜索（client-side tools）
-// 不再使用 web_search_20250305（network gateway 可能屏蔽），
-// 改为：tools=[web_search(client), fetch_page(client), record_finding]
-// Node 端真正执行 web_search/fetch_page，结果作为 tool_result 喂回模型。
+// 调研引擎：driver 抽象 + 受控搜索（client-side tools）
+// 不再直接依赖某个 SDK；通过 src/models/driver-* 访问任意厂商。
+// 工具模式 unchanged：tools=[web_search(client), fetch_page(client), record_finding]，Node 端真正执行 web/fetch。
 
-import Anthropic from '@anthropic-ai/sdk';
 import { FIELD_BY_KEY, NO_RESEARCH_FIELDS } from './field-spec.js';
 import { detectConflict } from './excel-io.js';
 import { webSearch, fetchPage, SEARCH_ENABLED } from './serp.js';
 
-const MODEL = process.env.ANTHROPIC_MODEL || 'claude-opus-4-8';
 const MAX_LOOPS = 6;             // 单字段最多 agent 步数（防失控；最后一轮会强制 record_finding）
 const MAX_FETCH_PER_FIELD = 4;   // 单字段最多抓取页数
 const DEBUG = process.env.RESEARCH_DEBUG === '1';
-
-let _client = null;
-function getClient() {
-  if (_client) return _client;
-  const opts = {};
-  if (process.env.ANTHROPIC_BASE_URL)   opts.baseURL   = process.env.ANTHROPIC_BASE_URL;
-  if (process.env.ANTHROPIC_AUTH_TOKEN) opts.authToken = process.env.ANTHROPIC_AUTH_TOKEN;
-  if (process.env.ANTHROPIC_API_KEY)    opts.apiKey    = process.env.ANTHROPIC_API_KEY;
-  _client = new Anthropic(opts);
-  return _client;
-}
 
 // 客户端工具：web_search + fetch_page；最终落点：record_finding
 const TOOLS = [
@@ -183,69 +169,70 @@ function mkResult(tool_use_id, payload) {
 
 /**
  * 调研单字段（agentic loop：模型决策 → 我们执行工具 → 喂回 → 直到 record_finding 或上限）
+ * @param {object} args
+ * @param {object} args.customer
+ * @param {string} args.fieldKey
+ * @param {'verify'|'fill'} [args.mode]
+ * @param {object} args.driver - 来自 src/models/registry 的 driver 实例（必传）
  */
-export async function researchField({ customer, fieldKey, mode, model = MODEL }) {
+export async function researchField({ customer, fieldKey, mode, driver }) {
   const spec = FIELD_BY_KEY[fieldKey];
   if (!spec) throw new Error(`未知字段：${fieldKey}`);
   if (NO_RESEARCH_FIELDS.has(fieldKey)) {
     return { result: { status: 'known', value: customer.raw_known?.[fieldKey] || '' }, sources: [] };
   }
+  if (!driver) throw new Error('researchField 需要 driver 实例');
+  const modelTag = driver.id;
 
   const knownValue = customer.raw_known?.[fieldKey] || '';
   const actualMode = mode || (knownValue ? 'verify' : 'fill');
 
-  const client = getClient();
   const system = buildSystemPrompt();
   const messages = [{ role: 'user', content: buildInitialUser({ customer, fieldKey, knownValue, mode: actualMode }) }];
   const state = { searchCount: 0, fetchCount: 0 };
 
   let recordFinding = null;
+  const FORCE_HINT = '请基于已收集的信息立即调用 record_finding 给出最终结论。如果信息不足以确定值，使用 status=unknown，并在 reason 里说明原因。不要再调用 web_search/fetch_page。';
 
   for (let loop = 0; loop < MAX_LOOPS; loop++) {
-    // 最后一轮强制 record_finding，避免模型还在搜没收尾
     const forceFinish = (loop === MAX_LOOPS - 1);
     let resp;
     try {
-      resp = await client.messages.create({
-        model,
-        max_tokens: 2000,
-        temperature: 0,
+      resp = await driver.chat({
         system,
         tools: TOOLS,
-        ...(forceFinish ? { tool_choice: { type: 'tool', name: 'record_finding' } } : {}),
-        messages: forceFinish
-          ? messages.concat({ role: 'user', content: '请基于已收集的信息立即调用 record_finding 给出最终结论。如果信息不足以确定值，使用 status=unknown，并在 reason 里说明原因。不要再调用 web_search/fetch_page。' })
-          : messages,
+        messages: forceFinish ? messages.concat({ role: 'user', content: FORCE_HINT }) : messages,
+        toolChoice: forceFinish ? { type: 'tool', name: 'record_finding' } : undefined,
+        maxTokens: 2000,
       });
     } catch (e) {
       const msg = String(e?.message || e);
-      if (/429|5\d\d|timeout|ECONN|network/i.test(msg) && loop < 2) {
+      if (/429|5\d\d|timeout|ECONN|network|abort/i.test(msg) && loop < 2) {
         await new Promise(r => setTimeout(r, 800 * (loop + 1)));
         continue;
       }
-      return { result: { status: 'unknown', reason: 'LLM 调用失败：' + msg, model }, sources: [] };
+      return { result: { status: 'unknown', reason: 'LLM 调用失败：' + msg, model: modelTag }, sources: [] };
     }
 
     if (DEBUG) {
-      const blocks = (resp.content || []).map(b => b.type === 'tool_use' ? `tool_use:${b.name}` : b.type).join(',');
-      console.log(`[research] ${customer.customer_name}/${fieldKey} loop=${loop}${forceFinish?'(force)':''} stop=${resp.stop_reason} blocks=[${blocks}] search=${state.searchCount} fetch=${state.fetchCount}`);
+      const blocks = (resp.toolUses || []).map(b => `tool_use:${b.name}`).join(',') || (resp.text ? 'text' : 'none');
+      console.log(`[research] ${customer.customer_name}/${fieldKey} [${driver.displayName}] loop=${loop}${forceFinish?'(force)':''} stop=${resp.stopReason} blocks=[${blocks}] search=${state.searchCount} fetch=${state.fetchCount}`);
     }
 
-    // 把 assistant 完整回复加入对话（注意：forceFinish 时上一轮 user 提示也要保留进 messages 里防漂移）
-    if (forceFinish) messages.push({ role: 'user', content: '请基于已收集的信息立即调用 record_finding 给出最终结论。如果信息不足以确定值，使用 status=unknown，并在 reason 里说明原因。不要再调用 web_search/fetch_page。' });
-    messages.push({ role: 'assistant', content: resp.content });
+    // 维持对话历史：forceFinish 时把那条提示也加到 messages 里防漂移
+    if (forceFinish) messages.push({ role: 'user', content: FORCE_HINT });
+    messages.push({ role: 'assistant', content: resp.assistantContent || [] });
 
-    const toolUses = (resp.content || []).filter(b => b.type === 'tool_use');
-    // 优先：record_finding 出现就终结
-    const final = toolUses.find(b => b.name === 'record_finding');
+    const toolUses = resp.toolUses || [];
+    const final = toolUses.find(t => t.name === 'record_finding');
     if (final) { recordFinding = final.input || {}; break; }
 
     if (toolUses.length === 0) {
-      // 无工具调用、无 record_finding —— 模型卡住，结束
+      // 无工具调用且无 record_finding：模型卡住，结束
       break;
     }
 
-    // 执行所有 client tool 调用
+    // 执行所有 client tool 调用，把结果作为 user/tool_result 喂回
     const results = [];
     for (const tu of toolUses) {
       results.push(await execClientTool(tu, state));
@@ -254,7 +241,7 @@ export async function researchField({ customer, fieldKey, mode, model = MODEL })
   }
 
   if (!recordFinding) {
-    return { result: { status: 'unknown', reason: '未在限定步数内得出结论', model, _stat: state }, sources: [] };
+    return { result: { status: 'unknown', reason: '未在限定步数内得出结论', model: modelTag, _stat: state }, sources: [] };
   }
 
   const out = {
@@ -263,7 +250,7 @@ export async function researchField({ customer, fieldKey, mode, model = MODEL })
     reason: recordFinding.reason || '',
     confidence: typeof recordFinding.confidence === 'number' ? recordFinding.confidence : null,
     known_value: knownValue || null,
-    model,
+    model: modelTag,
     _stat: state,
   };
   // verify 模式下二次冲突判定（双保险）
@@ -283,4 +270,4 @@ export async function researchField({ customer, fieldKey, mode, model = MODEL })
   return { result: out, sources: cleanSources };
 }
 
-export { MODEL as DEFAULT_MODEL, SEARCH_ENABLED };
+export { SEARCH_ENABLED };

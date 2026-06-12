@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>模型管理 · 商务通</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-thumb { background: #d4d7dd; border-radius: 3px; }
+  [x-cloak] { display: none !important; }
+  .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+  .tag-blue { background: rgba(22,93,255,0.1); color: #165DFF; }
+  .tag-green { background: rgba(0,180,42,0.12); color: #00B42A; }
+  .tag-red { background: rgba(245,63,63,0.1); color: #F53F3F; }
+  .tag-gray { background: #F5F7FA; color: #666; }
+  .modal-overlay { background: rgba(0,0,0,0.45); }
+</style>
+</head>
+<body class="bg-[#f7f8fa] text-gray-800" x-data="modelsPage()" x-init="init()" x-cloak>
+
+  <!-- 顶部 -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <a href="/" class="text-gray-400 hover:text-gray-600"><i class="fas fa-arrow-left"></i></a>
+      <h1 class="text-lg font-semibold flex items-center gap-2">
+        <i class="fas fa-microchip text-[#165DFF]"></i>模型管理
+      </h1>
+      <span class="text-xs text-gray-400">配置多个 LLM,启用后可在工作台并行调研</span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button @click="openNew()" class="bg-[#165DFF] hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+        <i class="fas fa-plus"></i>新增模型
+      </button>
+      <button @click="logout()" class="text-gray-500 hover:text-red-500 text-sm px-3 py-2"><i class="fas fa-right-from-bracket mr-1"></i>退出</button>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto p-6 space-y-4">
+    <!-- 通知 -->
+    <div class="fixed top-5 right-6 space-y-2 z-50">
+      <template x-for="(t,i) in toasts" :key="i">
+        <div class="bg-white shadow-lg border rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+             :class="t.type==='ok' ? 'border-green-300 bg-green-50' : (t.type==='err' ? 'border-red-300 bg-red-50' : 'border-gray-200')">
+          <i :class="t.type==='ok' ? 'fas fa-circle-check text-green-500' : (t.type==='err' ? 'fas fa-circle-xmark text-red-500' : 'fas fa-info-circle text-blue-500')"></i>
+          <span x-text="t.msg"></span>
+        </div>
+      </template>
+    </div>
+
+    <!-- 列表 -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 text-xs text-gray-600">
+            <tr>
+              <th class="px-4 py-3 text-left">模型名称</th>
+              <th class="px-4 py-3 text-left">提供商</th>
+              <th class="px-4 py-3 text-left">标识符</th>
+              <th class="px-4 py-3 text-left">API 端点</th>
+              <th class="px-4 py-3 text-center">状态</th>
+              <th class="px-4 py-3 text-left">最后测试</th>
+              <th class="px-4 py-3 text-center">操作</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            <template x-for="m in models" :key="m.id">
+              <tr class="hover:bg-blue-50/30">
+                <td class="px-4 py-3">
+                  <div class="font-medium" x-text="m.name"></div>
+                  <div class="text-xs text-gray-400" x-text="m.id"></div>
+                </td>
+                <td class="px-4 py-3"><span class="tag tag-blue" x-text="m.provider"></span></td>
+                <td class="px-4 py-3 font-mono text-xs text-gray-600" x-text="m.identifier"></td>
+                <td class="px-4 py-3 text-xs text-gray-600 truncate max-w-xs" :title="m.api_url" x-text="m.api_url"></td>
+                <td class="px-4 py-3 text-center">
+                  <button @click="toggle(m)" class="text-xs"
+                          :class="m.enabled ? 'tag tag-green' : 'tag tag-gray'">
+                    <i class="fas mr-1" :class="m.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                    <span x-text="m.enabled ? '启用' : '禁用'"></span>
+                  </button>
+                </td>
+                <td class="px-4 py-3 text-xs">
+                  <template x-if="m.last_test_at">
+                    <div>
+                      <span class="tag" :class="m.last_test_ok ? 'tag-green' : 'tag-red'" x-text="m.last_test_ok ? '通过' : '失败'"></span>
+                      <div class="text-gray-400 mt-0.5" x-text="formatTime(m.last_test_at)"></div>
+                      <template x-if="!m.last_test_ok && m.last_test_error">
+                        <div class="text-red-500 mt-0.5" x-text="m.last_test_error.slice(0,60)"></div>
+                      </template>
+                    </div>
+                  </template>
+                  <template x-if="!m.last_test_at"><span class="text-gray-400">未测试</span></template>
+                </td>
+                <td class="px-4 py-3 text-center whitespace-nowrap">
+                  <button @click="testOne(m)" :disabled="testing[m.id]" class="text-[#165DFF] hover:underline text-xs mr-2"
+                          :class="testing[m.id] ? 'opacity-50' : ''">
+                    <i class="fas mr-1" :class="testing[m.id] ? 'fa-spinner fa-spin' : 'fa-bolt'"></i>测试
+                  </button>
+                  <button @click="openEdit(m)" class="text-gray-600 hover:underline text-xs mr-2"><i class="fas fa-pen mr-1"></i>编辑</button>
+                  <button @click="del(m)" class="text-red-500 hover:underline text-xs"><i class="fas fa-trash mr-1"></i>删除</button>
+                </td>
+              </tr>
+            </template>
+            <tr x-show="!models.length">
+              <td colspan="7" class="text-center text-gray-400 py-12">
+                暂无模型。<button @click="openNew()" class="text-[#165DFF] hover:underline">立即添加</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- 新增/编辑 模态 -->
+  <div x-show="modalOpen" x-transition.opacity class="fixed inset-0 modal-overlay z-40 flex items-start justify-center pt-12 pb-12 overflow-y-auto" @click.self="modalOpen=false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4">
+      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h3 class="text-lg font-semibold" x-text="editingId ? '编辑模型' : '新增模型'"></h3>
+        <button @click="modalOpen=false" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-lg"></i></button>
+      </div>
+      <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="text-xs text-gray-500">名称<span class="text-red-500">*</span></label>
+            <input type="text" x-model="form.name" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如:Claude Opus 4.8"></div>
+          <div><label class="text-xs text-gray-500">提供商<span class="text-red-500">*</span></label>
+            <select x-model="form.provider" class="mt-1 w-full border rounded px-3 py-2 text-sm">
+              <option value="anthropic">anthropic (Claude 系列)</option>
+              <option value="openai">openai (GPT/DeepSeek/Qwen 兼容)</option>
+              <option value="custom">custom (自定义 OpenAI 兼容)</option>
+            </select></div>
+          <div><label class="text-xs text-gray-500">模型标识符<span class="text-red-500">*</span></label>
+            <input type="text" x-model="form.identifier" class="mt-1 w-full border rounded px-3 py-2 text-sm font-mono" placeholder="如:claude-opus-4-8"></div>
+          <div><label class="text-xs text-gray-500">版本</label>
+            <input type="text" x-model="form.version" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="可选"></div>
+        </div>
+        <div><label class="text-xs text-gray-500">描述</label>
+          <input type="text" x-model="form.description" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="可选"></div>
+
+        <div class="border-t pt-4 mt-2">
+          <h4 class="text-sm font-semibold mb-3">API 连接</h4>
+          <div><label class="text-xs text-gray-500">API 端点 URL<span class="text-red-500">*</span></label>
+            <input type="text" x-model="form.api_url" class="mt-1 w-full border rounded px-3 py-2 text-sm font-mono" placeholder="如:https://api.openai.com/v1/chat/completions"></div>
+          <div class="grid grid-cols-2 gap-4 mt-3">
+            <div><label class="text-xs text-gray-500">认证方式</label>
+              <select x-model="form.auth_type" class="mt-1 w-full border rounded px-3 py-2 text-sm">
+                <option value="bearer">Bearer Token</option>
+                <option value="api_key_header">x-api-key Header</option>
+                <option value="custom_header">自定义 Headers (在下方填)</option>
+                <option value="none">无认证</option>
+              </select></div>
+            <div><label class="text-xs text-gray-500">API Key / Token<span x-show="!editingId" class="text-red-500">*</span>
+              <span class="text-gray-400 text-[10px]" x-show="editingId">留空保持原值</span></label>
+              <input type="password" x-model="form.api_key" class="mt-1 w-full border rounded px-3 py-2 text-sm font-mono" :placeholder="editingId ? '••••••••' : '粘贴 API Key'"></div>
+          </div>
+          <div class="mt-3"><label class="text-xs text-gray-500">自定义 Headers (JSON,可选)</label>
+            <textarea x-model="form.custom_headers_text" rows="3" class="mt-1 w-full border rounded px-3 py-2 text-xs font-mono" placeholder='{"anthropic-version":"2023-06-01"}'></textarea>
+            <div class="text-[10px] text-gray-400 mt-0.5" x-show="form.custom_headers_error" x-text="form.custom_headers_error"></div></div>
+        </div>
+
+        <div class="border-t pt-4 mt-2 grid grid-cols-3 gap-4">
+          <div><label class="text-xs text-gray-500">超时(秒)</label>
+            <input type="number" x-model.number="form.timeout" class="mt-1 w-full border rounded px-3 py-2 text-sm" min="10" max="600"></div>
+          <div><label class="text-xs text-gray-500">重试次数</label>
+            <input type="number" x-model.number="form.max_retries" class="mt-1 w-full border rounded px-3 py-2 text-sm" min="0" max="10"></div>
+          <div><label class="text-xs text-gray-500">并发数</label>
+            <input type="number" x-model.number="form.concurrency" class="mt-1 w-full border rounded px-3 py-2 text-sm" min="1" max="20"></div>
+        </div>
+
+        <div class="flex items-center gap-2 pt-2">
+          <input type="checkbox" id="enabled" x-model="form.enabled" class="rounded">
+          <label for="enabled" class="text-sm">启用该模型</label>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3 rounded-b-xl">
+        <button @click="modalOpen=false" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">取消</button>
+        <button @click="save()" :disabled="saving" class="px-5 py-2 bg-[#165DFF] hover:bg-blue-600 text-white text-sm rounded-lg disabled:opacity-60">
+          <i class="fas mr-1" :class="saving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script>
+function modelsPage() {
+  return {
+    models: [],
+    toasts: [],
+    testing: {},
+    saving: false,
+    modalOpen: false,
+    editingId: null,
+    form: this._emptyForm(),
+
+    _emptyForm() {
+      return {
+        name: '', provider: 'anthropic', identifier: '', version: '', description: '',
+        api_url: '', auth_type: 'bearer', api_key: '',
+        custom_headers_text: '', custom_headers_error: '',
+        timeout: 120, max_retries: 3, concurrency: 4, enabled: true,
+      };
+    },
+
+    async init() {
+      await this.load();
+    },
+    async load() {
+      try { this.models = await fetch('/api/models').then(r => r.json()); }
+      catch (e) { this.notify('加载失败:' + e, 'err'); }
+    },
+    notify(msg, type='info') {
+      const t = { msg, type };
+      this.toasts.push(t);
+      setTimeout(() => { this.toasts = this.toasts.filter(x => x !== t); }, 3000);
+    },
+    formatTime(ts) {
+      if (!ts) return '';
+      const d = new Date(ts);
+      return d.toLocaleString('zh-CN', { hour12: false }).replace(/\//g,'-');
+    },
+
+    openNew() {
+      this.editingId = null;
+      this.form = this._emptyForm();
+      this.modalOpen = true;
+    },
+    async openEdit(m) {
+      this.editingId = m.id;
+      this.form = {
+        name: m.name || '', provider: m.provider || 'custom', identifier: m.identifier || '',
+        version: m.version || '', description: m.description || '',
+        api_url: m.api_url || '', auth_type: m.auth_type || 'bearer', api_key: '',
+        custom_headers_text: m.custom_headers ? JSON.stringify(m.custom_headers, null, 2) : '',
+        custom_headers_error: '',
+        timeout: m.timeout || 120, max_retries: m.max_retries || 3, concurrency: m.concurrency || 4,
+        enabled: m.enabled !== false,
+      };
+      this.modalOpen = true;
+    },
+    async save() {
+      // 解析 custom_headers
+      let headers = {};
+      if (this.form.custom_headers_text.trim()) {
+        try { headers = JSON.parse(this.form.custom_headers_text); }
+        catch (e) { this.form.custom_headers_error = 'JSON 格式错误:' + e.message; return; }
+      }
+      this.form.custom_headers_error = '';
+      if (!this.form.name || !this.form.api_url || !this.form.identifier) {
+        this.notify('名称 / 标识符 / API URL 必填', 'err'); return;
+      }
+      this.saving = true;
+      const body = {
+        name: this.form.name, provider: this.form.provider, identifier: this.form.identifier,
+        version: this.form.version, description: this.form.description,
+        api_url: this.form.api_url, auth_type: this.form.auth_type,
+        api_key: this.form.api_key,            // 空字符串后端会保留旧值
+        custom_headers: headers,
+        timeout: this.form.timeout, max_retries: this.form.max_retries, concurrency: this.form.concurrency,
+        enabled: this.form.enabled,
+      };
+      try {
+        const url = this.editingId ? `/api/models/${this.editingId}` : '/api/models';
+        const method = this.editingId ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.notify(this.editingId ? '已更新' : '已新增', 'ok');
+        this.modalOpen = false;
+        await this.load();
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      } finally {
+        this.saving = false;
+      }
+    },
+    async toggle(m) {
+      try {
+        const r = await fetch(`/api/models/${m.id}/toggle`, { method: 'POST' });
+        if (!r.ok) throw new Error((await r.json()).error || 'toggle 失败');
+        await this.load();
+      } catch (e) { this.notify(String(e.message), 'err'); }
+    },
+    async del(m) {
+      if (!confirm(`确认删除模型「${m.name}」?`)) return;
+      try {
+        const r = await fetch(`/api/models/${m.id}`, { method: 'DELETE' });
+        if (!r.ok) throw new Error((await r.json()).error || '删除失败');
+        this.notify('已删除', 'ok');
+        await this.load();
+      } catch (e) { this.notify(String(e.message), 'err'); }
+    },
+    async testOne(m) {
+      this.testing[m.id] = true;
+      try {
+        const r = await fetch(`/api/models/${m.id}/test`, { method: 'POST' });
+        const j = await r.json();
+        this.notify(j.ok ? `✓ ${m.name} 通过 (${j.latencyMs}ms)` : `✗ ${m.name}: ${j.error}`, j.ok ? 'ok' : 'err');
+        await this.load();
+      } catch (e) { this.notify(String(e.message), 'err'); }
+      finally { this.testing[m.id] = false; }
+    },
+    async logout() {
+      try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+      location.replace('/login.html');
+    },
+  };
+}
+</script>
+</body>
+</html>

@@ -63,8 +63,9 @@ export async function exportV2(filePath, customers) {
   // ===== Sheet 1: 客户调研总表 =====
   const ws = wb.addWorksheet('客户调研总表', { views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }] });
 
-  // 表头：与 V1 同顺序
-  ws.addRow(EXCEL_COLUMN_LABELS);
+  // 表头：V1 同顺序 + 末尾追加 "模型一致性" 列
+  const HEADERS = [...EXCEL_COLUMN_LABELS, '模型一致性'];
+  ws.addRow(HEADERS);
   const headerRow = ws.getRow(1);
   headerRow.font = { bold: true, color: { argb: 'FF333333' } };
   headerRow.fill = HEADER_FILL;
@@ -78,6 +79,14 @@ export async function exportV2(filePath, customers) {
       if (r.status === 'conflict' && Array.isArray(r.values)) return r.values.filter(Boolean).join('; ');
       return r.value ?? '';
     });
+    // 末尾追加 "模型一致性" 摘要：取所有有 model_summary 的字段汇总成一段（前 5 个最有信息量的）
+    const conflictFields = FIELDS.filter(f => cust.fields?.[f.key]?.status === 'conflict')
+      .map(f => f.label).slice(0, 5);
+    const summary = conflictFields.length
+      ? `冲突 ${conflictFields.length} 项: ${conflictFields.join('、')}`
+      : '所有字段一致';
+    rowVals.push(summary);
+
     const row = ws.addRow(rowVals);
     row.alignment = { vertical: 'top', wrapText: true };
 
@@ -93,10 +102,16 @@ export async function exportV2(filePath, customers) {
         cell.fill = GREEN_FILL;
       }
     });
+    // 模型一致性列染色：有冲突时也红
+    if (conflictFields.length) {
+      const c = row.getCell(HEADERS.length);
+      c.fill = RED_FILL;
+      c.font = { color: { argb: 'FFC2190C' }, bold: true };
+    }
   }
 
   // 列宽
-  EXCEL_COLUMN_LABELS.forEach((label, i) => {
+  HEADERS.forEach((label, i) => {
     ws.getColumn(i + 1).width = Math.min(Math.max(label.length * 2 + 2, 14), 36);
   });
 
