@@ -751,9 +751,9 @@ function app() {
     health: {},
     me: null,
     fields: [],
-    noResearch: ['customer_name', 'remark'],   // 后端实际不调研(返回 known/原值)的字段
-    disabledFields: ['remark'],                 // UI 中禁止勾选的字段(仅备注;客户姓名可勾选)
-    selectedFields: ['customer_name'],          // 默认勾选客户姓名
+    noResearch: ['remark'],                     // 后端实际不调研(返回原值)的字段
+    disabledFields: ['remark'],                 // UI 中禁止勾选的字段(仅备注)
+    selectedFields: ['customer_name'],          // 默认勾选公司名称
     modelOptions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     model: 'claude-opus-4-8',
     availableModels: [],   // 来自 /api/models?enabled=1

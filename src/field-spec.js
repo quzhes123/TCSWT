@@ -5,7 +5,9 @@
 
 /** @type {FieldSpec[]} */
 export const FIELDS = [
-  { key: 'customer_name',    label: '客户名称',   group: 'basic', hint: '已知，作为基准上下文，不补全' },
+  { key: 'customer_name',    label: '公司名称',   group: 'basic',
+    sources: { primary: ['企查查', '官网', '应用商店开发者信息'], fallback: ['LinkedIn', '媒体报道'] },
+    hint: '若已知则做一致性校验；若仅提供 APP/区域，则通过应用商店开发者、官网备案等查出运营公司全称' },
   { key: 'region',           label: '展业区域',   group: 'basic',
     sources: { primary: ['企查查', '官网', '年报'], fallback: ['LinkedIn'] } },
   { key: 'customer_level',   label: '客户等级',   group: 'basic',
@@ -81,7 +83,7 @@ export function mapHeadersToKeys(headers) {
 }
 
 /** 调研时排除的「不需要 LLM 补全」字段（已知主键/内部备注等） */
-export const NO_RESEARCH_FIELDS = new Set(['customer_name', 'remark']);
+export const NO_RESEARCH_FIELDS = new Set(['remark']);
 
 /** 数值型字段（用于冲突阈值判断） */
 export const NUMERIC_LIKE_FIELDS = new Set([

@@ -64,6 +64,24 @@ export function addCustomer(customer) {
   persist();
   return c;
 }
+/** 更新客户的显示名（用于调研后从兜底名 "APP @ 区域" 升级为真实公司名）。
+ *  仅在新名字与现有名字不同且新名字非空时更新；遇到同名冲突保持原状不抛错。
+ */
+export function updateCustomerName(id, newName) {
+  const s = load();
+  const c = s.customers.find(x => x.id === id);
+  if (!c) return null;
+  const name = String(newName || '').trim();
+  if (!name || name === c.customer_name) return c;
+  // 防止与已有客户重名
+  if (s.customers.some(x => x.id !== id && x.customer_name === name)) return c;
+  c.customer_name = name;
+  // 同步把 raw_known.customer_name 也补上（之后报告/导出会展示）
+  c.raw_known = c.raw_known || {};
+  if (!c.raw_known.customer_name) c.raw_known.customer_name = name;
+  persist();
+  return c;
+}
 export function clearAll() {
   _state = structuredClone(DEFAULT);
   persist();

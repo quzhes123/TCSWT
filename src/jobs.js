@@ -138,6 +138,15 @@ async function runJob(jobId, customers, fields, modelIds, customSpecMap = {}) {
             confidence: null,
           }, merged.sources || []);
 
+          // 若调研的是「公司名称」且查到了真实值，而该客户当前没有用户填写的真实公司名
+          // （raw_known.customer_name 缺失，说明只填了 APP/区域，记录名是兜底），则用调研结果更新显示名
+          if (field === 'customer_name'
+              && (merged.status === 'filled' || merged.status === 'agree')
+              && merged.value && String(merged.value).trim()
+              && !customer.raw_known?.customer_name) {
+            try { db.updateCustomerName(customer.id, String(merged.value).trim()); } catch {}
+          }
+
           stepStatus = merged.status;
           stepValue = merged.status === 'conflict'
             ? (merged.values || []).filter(Boolean).join(' / ')

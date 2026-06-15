@@ -267,14 +267,13 @@ app.post('/api/research/by-name', async (req, reply) => {
   // 客户记录的展示名:优先公司名 → 否则用 fallback (前端构造的"APP @ 区域"格式)
   const customer_name = realCompany || fallbackName || appNameTrim || regionTrim;
   try {
-    const raw_known = { customer_name };
-    // 仅当用户真的填了公司名才把 customer_name 当"已知"传给模型；
-    // 否则模型只看 APP / 区域 自己推断
+    // raw_known 只装"用户实际填写的字段",兜底名不进 raw_known(否则会被当已知值参与合并冲突)
+    const raw_known = {};
     if (realCompany) raw_known.customer_name = realCompany;
     if (appNameTrim) raw_known.app_name = appNameTrim;
     if (regionTrim)  raw_known.region   = regionTrim;
     const c = db.addCustomer({
-      customer_name,
+      customer_name,                                  // 客户记录显示名(可能是兜底)
       ...(regionTrim ? { region: regionTrim } : {}),
       raw_known,
     });

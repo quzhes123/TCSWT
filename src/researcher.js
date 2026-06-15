@@ -112,17 +112,36 @@ function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
     ].filter(Boolean).join('\n');
   }
   // fill
+  // 公司名称字段在 "无公司名只有 APP/区域" 场景需要特殊引导:从 APP 反查运营公司
+  const isCompanyName = (fieldKey === 'customer_name');
+  const knownAppName = customer.raw_known?.app_name || '';
+  const knownRegion  = customer.raw_known?.region   || '';
+  const userInputCompany = customer.raw_known?.customer_name || '';
+  const companyNameHint = isCompanyName && !userInputCompany && (knownAppName || knownRegion)
+    ? [
+        `\n## 公司名称专项提示`,
+        `当前未提供公司名,需要根据${knownAppName ? ' APP=' + knownAppName : ''}${knownRegion ? ' 区域=' + knownRegion : ''} 反查运营公司全称:`,
+        `- 优先在应用商店开发者页(Google Play / App Store)找 "Provider/Developer/开发者" 字段`,
+        `- 其次官网底部"关于我们/Contact/联系我们"找注册主体`,
+        `- 海外可查 OpenCorporates / 各国商业注册;国内可查工信部 ICP 备案 / 企查查`,
+        `value 填公司全称(如:Cadena de Extensión, S.A. de C.V.)`,
+      ].join('\n')
+    : '';
+  const searchKw = isCompanyName && !userInputCompany
+    ? [knownAppName, knownRegion, '运营公司 OR developer'].filter(Boolean).join(' ')
+    : `${customer.customer_name} ${spec.label}`;
   return [
     `# 任务：补全缺失字段`,
     `客户：${customer.customer_name}`,
     `字段：${spec.label}（当前为空）`,
     ``,
     `请按以下流程：`,
-    `1) 用 web_search 搜 "${customer.customer_name} ${spec.label}" 等关键词，叠加优先来源（如年报、巨潮、SEC EDGAR、36氪、LinkedIn 等）`,
+    `1) 用 web_search 搜 "${searchKw}" 等关键词，叠加优先来源（如年报、巨潮、SEC EDGAR、36氪、LinkedIn 等）`,
     `2) 选 1–3 条最相关 URL，逐一 fetch_page 拿正文`,
     `3) 从正文中提取值与佐证句，调 record_finding(status=filled, value, reason, confidence, sources)`,
     `4) 若多源不一致 → status=conflict, value 用 ;分号串联，reason 解释差异`,
     `5) 完全查不到 → status=unknown`,
+    companyNameHint,
     ``,
     guide ? `## 调研指引\n${guide}` : '',
     ctx,
