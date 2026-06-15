@@ -286,13 +286,13 @@
           <h2 class="text-base font-semibold"><i class="fas fa-list-check text-[#165DFF] mr-1"></i>3. 选择字段范围（可选，留空 = 全部）</h2>
           <div class="flex gap-2">
             <button class="text-xs text-[#165DFF] hover:underline" @click="selectedFields=[]">清空</button>
-            <button class="text-xs text-[#165DFF] hover:underline" @click="selectedFields=fields.filter(f=>!noResearch.includes(f.key)).map(f=>f.key)">全选</button>
+            <button class="text-xs text-[#165DFF] hover:underline" @click="selectedFields=fields.filter(f=>!disabledFields.includes(f.key)).map(f=>f.key)">全选</button>
           </div>
         </div>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
           <template x-for="f in fields" :key="f.key">
-            <label class="flex items-center gap-2 text-sm py-1 cursor-pointer" :class="noResearch.includes(f.key) ? 'opacity-40 cursor-not-allowed' : ''">
-              <input type="checkbox" :value="f.key" x-model="selectedFields" :disabled="noResearch.includes(f.key)" class="rounded">
+            <label class="flex items-center gap-2 text-sm py-1 cursor-pointer" :class="disabledFields.includes(f.key) ? 'opacity-40 cursor-not-allowed' : ''">
+              <input type="checkbox" :value="f.key" x-model="selectedFields" :disabled="disabledFields.includes(f.key)" class="rounded">
               <span x-text="f.label"></span>
             </label>
           </template>
@@ -751,8 +751,9 @@ function app() {
     health: {},
     me: null,
     fields: [],
-    noResearch: ['customer_name', 'remark'],
-    selectedFields: [],
+    noResearch: ['customer_name', 'remark'],   // 后端实际不调研(返回 known/原值)的字段
+    disabledFields: ['remark'],                 // UI 中禁止勾选的字段(仅备注;客户姓名可勾选)
+    selectedFields: ['customer_name'],          // 默认勾选客户姓名
     modelOptions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
     model: 'claude-opus-4-8',
     availableModels: [],   // 来自 /api/models?enabled=1
