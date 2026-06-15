@@ -253,16 +253,24 @@ app.post('/api/research', async (req, reply) => {
   }
 });
 
-// ============ API: 按指定内容快调（公司名+APP名+展业区域，至少需要公司名）============
+// ============ API: 按指定内容快调（公司名 / APP 名 / 展业区域，三者至少一项）============
 app.post('/api/research/by-name', async (req, reply) => {
-  const { name, app_name, region, fields, models, custom_fields } = req.body || {};
-  const customer_name = String(name || '').trim();
-  if (!customer_name) return reply.code(400).send({ error: '请填入公司名称' });
+  const { name, customer_name_input, app_name, region, fields, models, custom_fields } = req.body || {};
+  const fallbackName = String(name || '').trim();
+  const realCompany = String(customer_name_input || '').trim();   // 用户实际输入的公司名（可能为空）
+  const appNameTrim = String(app_name || '').trim();
+  const regionTrim = String(region || '').trim();
+  // 三选一校验：必须至少有一项
+  if (!fallbackName && !realCompany && !appNameTrim && !regionTrim) {
+    return reply.code(400).send({ error: '请至少填写公司名称 / APP 名称 / 展业区域 中的一项' });
+  }
+  // 客户记录的展示名:优先公司名 → 否则用 fallback (前端构造的"APP @ 区域"格式)
+  const customer_name = realCompany || fallbackName || appNameTrim || regionTrim;
   try {
-    // raw_known 把所有用户填的字段都塞进去,作为调研基准上下文
     const raw_known = { customer_name };
-    const appNameTrim = String(app_name || '').trim();
-    const regionTrim = String(region || '').trim();
+    // 仅当用户真的填了公司名才把 customer_name 当"已知"传给模型；
+    // 否则模型只看 APP / 区域 自己推断
+    if (realCompany) raw_known.customer_name = realCompany;
     if (appNameTrim) raw_known.app_name = appNameTrim;
     if (regionTrim)  raw_known.region   = regionTrim;
     const c = db.addCustomer({
