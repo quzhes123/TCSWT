@@ -244,23 +244,33 @@ app.get('/api/stats', async () => db.computeStats());
 
 // ============ API: 调研任务 ============
 app.post('/api/research', async (req, reply) => {
-  const { customer_ids, fields, models } = req.body || {};
+  const { customer_ids, fields, models, custom_fields } = req.body || {};
   try {
-    const job = startResearchJob({ customer_ids, fields, models });
+    const job = startResearchJob({ customer_ids, fields, models, custom_fields });
     return { ok: true, job };
   } catch (e) {
     return reply.code(400).send({ error: String(e?.message || e) });
   }
 });
 
-// ============ API: 按公司名手工快调 ============
+// ============ API: 按指定内容快调（公司名+APP名+展业区域，至少需要公司名）============
 app.post('/api/research/by-name', async (req, reply) => {
-  const { name, fields, models } = req.body || {};
+  const { name, app_name, region, fields, models, custom_fields } = req.body || {};
   const customer_name = String(name || '').trim();
   if (!customer_name) return reply.code(400).send({ error: '请填入公司名称' });
   try {
-    const c = db.addCustomer({ customer_name, raw_known: { customer_name } });
-    const job = startResearchJob({ customer_ids: [c.id], fields, models });
+    // raw_known 把所有用户填的字段都塞进去,作为调研基准上下文
+    const raw_known = { customer_name };
+    const appNameTrim = String(app_name || '').trim();
+    const regionTrim = String(region || '').trim();
+    if (appNameTrim) raw_known.app_name = appNameTrim;
+    if (regionTrim)  raw_known.region   = regionTrim;
+    const c = db.addCustomer({
+      customer_name,
+      ...(regionTrim ? { region: regionTrim } : {}),
+      raw_known,
+    });
+    const job = startResearchJob({ customer_ids: [c.id], fields, models, custom_fields });
     return { ok: true, customer: c, job };
   } catch (e) {
     return reply.code(400).send({ error: String(e?.message || e) });

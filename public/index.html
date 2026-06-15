@@ -64,6 +64,20 @@
 </head>
 <body class="bg-[#f7f8fa] text-gray-800" x-data="app()" x-cloak x-init="init()">
 
+  <!-- 全局 JS 错误捕获:防止"按钮点了没反应"无声失败 -->
+  <script>
+    window.addEventListener('error', e => {
+      try { console.error('[GLOBAL ERROR]', e.message, e.error); } catch {}
+      const div = document.createElement('div');
+      div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:12px 20px;z-index:99999;font-size:13px;font-family:monospace;';
+      div.innerHTML = '⚠️ 页面 JS 错误: ' + (e.message || 'unknown') + '<br>请按 <strong>Ctrl+Shift+R</strong> 强制刷新或 F12 查看详情';
+      document.body.appendChild(div);
+    });
+    window.addEventListener('unhandledrejection', e => {
+      try { console.error('[UNHANDLED PROMISE]', e.reason); } catch {}
+    });
+  </script>
+
   <!-- 移动端遮罩 -->
   <div x-show="mobileNav" x-transition.opacity class="fixed inset-0 bg-black/40 z-30 md:hidden" @click="mobileNav=false"></div>
 
@@ -181,7 +195,7 @@
           <button class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
                   :class="inputMode==='name' ? 'text-[#165DFF] border-[#165DFF]' : 'text-gray-500 border-transparent hover:text-gray-700'"
                   @click="inputMode='name'">
-            <i class="fas fa-building mr-1.5"></i>按公司名称
+            <i class="fas fa-pen-to-square mr-1.5"></i>按确定内容
           </button>
           <button class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
                   :class="inputMode==='file' ? 'text-[#165DFF] border-[#165DFF]' : 'text-gray-500 border-transparent hover:text-gray-700'"
@@ -206,15 +220,38 @@
           </div>
         </div>
 
-        <!-- 模式 B: 公司名称 -->
-        <div x-show="inputMode==='name'">
-          <div class="relative">
-            <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
-            <input type="text" x-model="companyName"
-                   placeholder="输入公司全称，如：杭州某某金融服务有限公司"
-                   class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+        <!-- 模式 B: 按确定内容（公司名称 / APP 名称 / 展业区域） -->
+        <div x-show="inputMode==='name'" class="space-y-3">
+          <div>
+            <label class="text-xs text-gray-500">公司名称 <span class="text-red-500">*</span></label>
+            <div class="relative mt-1">
+              <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              <input type="text" x-model="companyName"
+                     placeholder="如:杭州某某金融服务有限公司"
+                     class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+            </div>
           </div>
-          <div class="text-[11px] text-gray-500 mt-2">系统将新建一条客户记录，按下方所选<b>模型</b>与<b>字段范围</b>联网调研补全（含来源标注）。</div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-gray-500">APP 名称 <span class="text-gray-400 text-[10px]">(可选)</span></label>
+              <div class="relative mt-1">
+                <i class="fas fa-mobile-screen absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                <input type="text" x-model="appName"
+                       placeholder="如:TruCred / 拍拍贷"
+                       class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+              </div>
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">展业区域 <span class="text-gray-400 text-[10px]">(可选)</span></label>
+              <div class="relative mt-1">
+                <i class="fas fa-location-dot absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                <input type="text" x-model="region"
+                       placeholder="如:墨西哥 / 中国 / 印尼"
+                       class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+              </div>
+            </div>
+          </div>
+          <div class="text-[11px] text-gray-500">系统将以填写的内容作为基准上下文,按下方所选<b>模型</b>与<b>字段范围</b>联网调研补全(含来源标注)。</div>
         </div>
       </div>
 
@@ -257,6 +294,30 @@
             </label>
           </template>
         </div>
+
+        <!-- 自定义字段 -->
+        <div class="mt-4 pt-4 border-t border-gray-100">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-sm font-semibold text-gray-700"><i class="fas fa-plus-circle text-amber-500 mr-1"></i>自定义字段（不在预定义中的字段，临时调研用）</h3>
+            <button @click="addCustomField()" class="text-xs text-[#165DFF] hover:underline"><i class="fas fa-plus mr-1"></i>添加字段</button>
+          </div>
+          <div x-show="!customFields.length" class="text-[11px] text-gray-400 py-2">点击"添加字段"输入字段名称（如「合作伙伴名单」「最近一轮融资金额」），系统会调研并补全。</div>
+          <div class="space-y-2">
+            <template x-for="(cf, i) in customFields" :key="i">
+              <div class="flex flex-col md:flex-row gap-2 items-start md:items-center">
+                <div class="flex-1 w-full">
+                  <input type="text" x-model="cf.label" placeholder="字段名称（必填，如:最近一轮融资金额）"
+                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-1 focus:ring-[#165DFF]/15 outline-none">
+                </div>
+                <div class="flex-1 w-full">
+                  <input type="text" x-model="cf.hint" placeholder="调研提示（可选,如:重点查 Crunchbase / 36氪）"
+                         class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-1 focus:ring-[#165DFF]/15 outline-none">
+                </div>
+                <button @click="customFields.splice(i,1)" class="text-red-500 hover:text-red-700 px-2 py-1.5" title="删除"><i class="fas fa-trash"></i></button>
+              </div>
+            </template>
+          </div>
+        </div>
       </div>
 
       <div class="card p-4 md:p-5">
@@ -268,7 +329,7 @@
             <span x-text="job?.status==='running' ? '调研中...' : '执行调研任务'"></span>
           </button>
           <span class="text-xs text-gray-500" x-show="canResearch && job?.status!=='running'">
-            将对 <b x-text="researchTargetDesc"></b>、<b x-text="selectedFields.length || (fields.length - noResearch.length)"></b> 个字段发起调研
+            将对 <b x-text="researchTargetDesc"></b>、<b x-text="totalFieldCount"></b> 个字段发起调研<span x-show="customFieldCount" class="text-amber-600">（含 <span x-text="customFieldCount"></span> 个自定义）</span>
           </span>
         </div>
         <div class="text-xs text-red-500 mt-2" x-show="researchError" x-text="researchError"></div>
@@ -681,9 +742,12 @@ function app() {
     selectedModels: [],    // 用户勾选的模型 id
     parseRes: null,
 
-    // 输入模式：name = 按公司名称；file = 按表格内容
+    // 输入模式：name = 按确定内容（公司名/APP/区域）；file = 按表格内容
     inputMode: 'name',
     companyName: '',
+    appName: '',
+    region: '',
+    customFields: [],   // [{label, hint}]
     lastReportCustomerId: null,
     researchError: '',
 
@@ -803,17 +867,22 @@ function app() {
       } catch (e) { this.notify(String(e.message), 'err'); }
     },
     async testModel(m) {
-      this.modelTesting[m.id] = true;
+      console.log('[testModel] 开始测试', m?.id, m?.name);
+      if (!m || !m.id) { this.notify('参数错误:模型 id 缺失', 'err'); return; }
+      this.modelTesting = { ...this.modelTesting, [m.id]: true };
       try {
         const r = await fetch(`/api/models/${m.id}/test`, { method: 'POST', credentials: 'same-origin' });
+        console.log('[testModel] HTTP', r.status);
         if (r.status === 401) { location.replace('/login.html'); return; }
         let j; try { j = await r.json(); } catch { j = { ok: false, error: 'HTTP ' + r.status }; }
+        console.log('[testModel] result', j);
         this.notify(j.ok ? `✓ ${m.name} 通过 (${j.latencyMs}ms)` : `✗ ${m.name}: ${j.error || '失败'}`, j.ok ? 'ok' : 'err');
         await this.loadModels();
       } catch (e) {
+        console.error('[testModel] error', e);
         this.notify('测试失败: ' + (e?.message || e), 'err');
       } finally {
-        this.modelTesting[m.id] = false;
+        this.modelTesting = { ...this.modelTesting, [m.id]: false };
       }
     },
     async logout() {
@@ -844,18 +913,31 @@ function app() {
       }
     },
 
+    addCustomField() {
+      this.customFields.push({ label: '', hint: '' });
+    },
+
     async runResearch() {
       if (!this.canResearch || this.job?.status === 'running') return;
       this.researchError = '';
       const fieldsBody = this.selectedFields.length ? this.selectedFields : undefined;
       const modelsBody = this.selectedModels.length ? this.selectedModels : undefined;
+      // 自定义字段:仅取 label 非空的
+      const customBody = (this.customFields || [])
+        .map(c => ({ label: String(c.label || '').trim(), hint: String(c.hint || '').trim() }))
+        .filter(c => c.label);
       try {
         let j;
         if (this.inputMode === 'name') {
           const name = this.companyName.trim();
           const body = { name };
+          const app = this.appName.trim();
+          const region = this.region.trim();
+          if (app) body.app_name = app;
+          if (region) body.region = region;
           if (modelsBody) body.models = modelsBody;
           if (fieldsBody) body.fields = fieldsBody;
+          if (customBody.length) body.custom_fields = customBody;
           const r = await fetch('/api/research/by-name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
           j = await r.json();
           if (!r.ok) throw new Error(j.error || '触发失败');
@@ -864,6 +946,7 @@ function app() {
           const body = {};
           if (modelsBody) body.models = modelsBody;
           if (fieldsBody) body.fields = fieldsBody;
+          if (customBody.length) body.custom_fields = customBody;
           const r = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
           j = await r.json();
           if (!r.ok) throw new Error(j.error || '触发失败');
@@ -900,6 +983,13 @@ function app() {
     get researchTargetDesc() {
       if (this.inputMode === 'name') return this.companyName.trim() || '该公司';
       return (this.parseRes?.customer_count || 0) + ' 名客户';
+    },
+    get customFieldCount() {
+      return (this.customFields || []).filter(c => String(c.label || '').trim()).length;
+    },
+    get totalFieldCount() {
+      const base = this.selectedFields.length || (this.fields.length - this.noResearch.length);
+      return base + this.customFieldCount;
     },
     get jobStatusText() {
       return { running: '调研中', done: '已完成', failed: '失败', pending: '排队中' }[this.job?.status] || (this.job?.status || '');

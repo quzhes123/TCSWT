@@ -88,8 +88,7 @@ function fieldGuidance(spec) {
   return lines.join('\n');
 }
 
-function buildInitialUser({ customer, fieldKey, knownValue, mode }) {
-  const spec = FIELD_BY_KEY[fieldKey];
+function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
   const ctxLines = Object.entries(customer.raw_known || {})
     .filter(([, v]) => v && String(v).trim())
     .map(([k, v]) => `- ${FIELD_BY_KEY[k]?.label || k}: ${v}`);
@@ -171,12 +170,14 @@ function mkResult(tool_use_id, payload) {
  * 调研单字段（agentic loop：模型决策 → 我们执行工具 → 喂回 → 直到 record_finding 或上限）
  * @param {object} args
  * @param {object} args.customer
- * @param {string} args.fieldKey
+ * @param {string} args.fieldKey - 字段 key（预定义字段在 FIELD_BY_KEY 中；自定义字段需配合 spec）
+ * @param {object} [args.spec]   - 自定义字段时显式传入 {key, label, hint?, sources?}；预定义字段忽略此项
  * @param {'verify'|'fill'} [args.mode]
  * @param {object} args.driver - 来自 src/models/registry 的 driver 实例（必传）
  */
-export async function researchField({ customer, fieldKey, mode, driver }) {
-  const spec = FIELD_BY_KEY[fieldKey];
+export async function researchField({ customer, fieldKey, spec: customSpec, mode, driver }) {
+  // 优先用显式传入的 spec（自定义字段）；否则查预定义字典
+  const spec = customSpec || FIELD_BY_KEY[fieldKey];
   if (!spec) throw new Error(`未知字段：${fieldKey}`);
   if (NO_RESEARCH_FIELDS.has(fieldKey)) {
     return { result: { status: 'known', value: customer.raw_known?.[fieldKey] || '' }, sources: [] };
@@ -188,7 +189,7 @@ export async function researchField({ customer, fieldKey, mode, driver }) {
   const actualMode = mode || (knownValue ? 'verify' : 'fill');
 
   const system = buildSystemPrompt();
-  const messages = [{ role: 'user', content: buildInitialUser({ customer, fieldKey, knownValue, mode: actualMode }) }];
+  const messages = [{ role: 'user', content: buildInitialUser({ customer, fieldKey, knownValue, mode: actualMode, spec }) }];
   const state = { searchCount: 0, fetchCount: 0 };
 
   let recordFinding = null;
