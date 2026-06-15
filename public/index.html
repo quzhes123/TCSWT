@@ -556,12 +556,15 @@
                     <template x-if="!m.last_test_at"><span class="text-gray-400">未测试</span></template>
                   </td>
                   <td class="px-4 py-3 text-center whitespace-nowrap">
-                    <button @click="testModel(m)" :disabled="modelTesting[m.id]" class="text-[#165DFF] hover:underline text-xs mr-2"
-                            :class="modelTesting[m.id] ? 'opacity-50' : ''">
-                      <i class="fas mr-1" :class="modelTesting[m.id] ? 'fa-spinner fa-spin' : 'fa-bolt'"></i>测试
+                    <button type="button"
+                            @click.stop.prevent="testModel(m)"
+                            :disabled="modelTesting && modelTesting[m.id]"
+                            class="text-[#165DFF] hover:underline text-xs mr-2"
+                            :class="(modelTesting && modelTesting[m.id]) ? 'opacity-50' : ''">
+                      <i class="fas mr-1" :class="(modelTesting && modelTesting[m.id]) ? 'fa-spinner fa-spin' : 'fa-bolt'"></i>测试
                     </button>
-                    <button @click="openModelEdit(m)" class="text-gray-600 hover:underline text-xs mr-2"><i class="fas fa-pen mr-1"></i>编辑</button>
-                    <button @click="delModel(m)" class="text-red-500 hover:underline text-xs"><i class="fas fa-trash mr-1"></i>删除</button>
+                    <button type="button" @click.stop.prevent="openModelEdit(m)" class="text-gray-600 hover:underline text-xs mr-2"><i class="fas fa-pen mr-1"></i>编辑</button>
+                    <button type="button" @click.stop.prevent="delModel(m)" class="text-red-500 hover:underline text-xs"><i class="fas fa-trash mr-1"></i>删除</button>
                   </td>
                 </tr>
               </template>
@@ -686,7 +689,18 @@
               </select></div>
             <div><label class="text-xs text-gray-500">API Key / Token<span x-show="!editingModelId" class="text-red-500">*</span>
               <span class="text-gray-400 text-[10px]" x-show="editingModelId">留空保持原值</span></label>
-              <input type="password" x-model="modelForm.api_key" class="mt-1 w-full border rounded px-3 py-2 text-sm font-mono" :placeholder="editingModelId ? '••••••••' : '粘贴 API Key'"></div>
+              <div class="relative mt-1">
+                <input :type="showKey ? 'text' : 'password'" x-model="modelForm.api_key"
+                       class="w-full pr-16 border rounded px-3 py-2 text-sm font-mono"
+                       :placeholder="editingModelId ? '保持原值（留空不修改）' : '粘贴 API Key'"
+                       autocomplete="off" spellcheck="false">
+                <button type="button" @click="showKey=!showKey"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-[#165DFF] px-1.5 py-0.5">
+                  <i class="fas" :class="showKey ? 'fa-eye-slash' : 'fa-eye'"></i>
+                  <span class="ml-1" x-text="showKey ? '隐藏' : '显示'"></span>
+                </button>
+              </div>
+            </div>
           </div>
           <div class="mt-3"><label class="text-xs text-gray-500">自定义 Headers (JSON,可选)</label>
             <textarea x-model="modelForm.custom_headers_text" rows="3" class="mt-1 w-full border rounded px-3 py-2 text-xs font-mono" placeholder='{"anthropic-version":"2023-06-01"}'></textarea>
@@ -761,6 +775,7 @@ function app() {
     modelTesting: {},
     modelModalOpen: false,
     modelSaving: false,
+    showKey: false,
     editingModelId: null,
     modelForm: emptyModelForm(),
     job: null, _pollTimer: null,
@@ -803,6 +818,7 @@ function app() {
     openModelNew() {
       this.editingModelId = null;
       this.modelForm = emptyModelForm();
+      this.showKey = false;
       this.modelModalOpen = true;
     },
     openModelEdit(m) {
@@ -816,6 +832,7 @@ function app() {
         timeout: m.timeout || 120, max_retries: m.max_retries || 3, concurrency: m.concurrency || 4,
         enabled: m.enabled !== false,
       };
+      this.showKey = false;
       this.modelModalOpen = true;
     },
     async saveModel() {
