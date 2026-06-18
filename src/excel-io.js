@@ -177,13 +177,10 @@ export async function buildTemplate(filePath) {
 
 /** 字段管理列定义（导出/导入共用） */
 const FIELD_DEF_COLUMNS = [
-  { header: '字段Key（导入时留空=新建，勿改已有值）', key: 'key' },
   { header: '中文名称', key: 'label' },
-  { header: '字段解释（喂给大模型）', key: 'hint' },
+  { header: '字段解释', key: 'hint' },
   { header: '来源说明', key: 'source_note' },
   { header: '分组', key: 'group' },
-  { header: '数值型(是/否)', key: 'numeric' },
-  { header: '参与调研(是/否)', key: 'no_research_inv' },
   { header: '启用(是/否)', key: 'enabled' },
 ];
 
@@ -200,8 +197,8 @@ export async function exportFieldDefs(filePath, defs) {
   const yn = (b) => (b ? '是' : '否');
   for (const f of defs) {
     ws.addRow([
-      f.key || '', f.label || '', f.hint || '', f.source_note || '',
-      f.group || 'custom', yn(!!f.numeric), yn(f.no_research !== true), yn(f.enabled !== false),
+      f.label || '', f.hint || '', f.source_note || '',
+      f.group || 'custom', yn(f.enabled !== false),
     ]);
   }
   FIELD_DEF_COLUMNS.forEach((c, i) => {
@@ -211,7 +208,8 @@ export async function exportFieldDefs(filePath, defs) {
   return filePath;
 }
 
-/** 解析导入的字段定义 xlsx，返回规范化的行对象数组（不落库，由调用方决定 upsert） */
+/** 解析导入的字段定义 xlsx，返回规范化的行对象数组（不落库，由调用方决定 upsert）。
+ *  无 key 列：导入时按「中文名称」匹配（同名更新，否则新建）。 */
 export async function parseFieldDefs(filePath) {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.readFile(filePath);
@@ -228,17 +226,14 @@ export async function parseFieldDefs(filePath) {
   for (let r = 2; r <= ws.rowCount; r++) {
     const row = ws.getRow(r);
     if (!row.hasValues) continue;
-    const label = cellText(row.getCell(2));
+    const label = cellText(row.getCell(1));
     if (!label) continue; // 中文名称必填，空行跳过
     rows.push({
-      key: cellText(row.getCell(1)),
       label,
-      hint: cellText(row.getCell(3)),
-      source_note: cellText(row.getCell(4)),
-      group: cellText(row.getCell(5)) || 'custom',
-      numeric: isYes(cellText(row.getCell(6))),
-      no_research: !isYes(cellText(row.getCell(7))), // “参与调研=是” → no_research=false
-      enabled: cellText(row.getCell(8)) === '' ? true : isYes(cellText(row.getCell(8))),
+      hint: cellText(row.getCell(2)),
+      source_note: cellText(row.getCell(3)),
+      group: cellText(row.getCell(4)) || 'custom',
+      enabled: cellText(row.getCell(5)) === '' ? true : isYes(cellText(row.getCell(5))),
     });
   }
   return rows;

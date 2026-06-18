@@ -487,14 +487,20 @@ export function deleteFieldDef(key) {
  */
 export function importFieldDefs(rows) {
   let created = 0, updated = 0;
+  const all = load().field_defs;
   for (const row of (rows || [])) {
     const patch = {
       label: row.label, hint: row.hint || '', source_note: row.source_note || '',
-      group: row.group || 'custom', numeric: !!row.numeric,
-      no_research: !!row.no_research, enabled: row.enabled !== false,
+      group: row.group || 'custom', enabled: row.enabled !== false,
     };
-    if (row.key && getFieldDef(row.key)) {
-      updateFieldDef(row.key, patch);
+    // numeric / no_research 不在导入模板中：仅当行里显式提供才写，避免覆盖内置字段已有设置
+    if ('numeric' in row) patch.numeric = !!row.numeric;
+    if ('no_research' in row) patch.no_research = !!row.no_research;
+    // 无 key 列：按 key（兼容旧模板）或中文名称匹配——同名则更新，否则新建
+    const existing = (row.key && getFieldDef(row.key))
+      || all.find(f => f.label === row.label);
+    if (existing) {
+      updateFieldDef(existing.key, patch);
       updated++;
     } else {
       createFieldDef(patch);
