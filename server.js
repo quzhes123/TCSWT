@@ -9,10 +9,10 @@ import multipart from '@fastify/multipart';
 import staticPlugin from '@fastify/static';
 import { nanoid } from 'nanoid';
 
-import { parseV1, exportV2 } from './src/excel-io.js';
+import { parseV1, exportV2, buildTemplate, exportFieldDefs, parseFieldDefs } from './src/excel-io.js';
 import * as db from './src/db.js';
 import { startResearchJob } from './src/jobs.js';
-import { FIELDS, FIELD_BY_KEY } from './src/field-spec.js';
+import { getActiveFields } from './src/fields.js';
 import { SEARCH_ENABLED, PROVIDER as SEARCH_PROVIDER } from './src/serp.js';
 import { reloadRegistry } from './src/models/registry.js';
 import { AnthropicDriver } from './src/models/driver-anthropic.js';
@@ -158,7 +158,7 @@ app.get('/api/me', async (req, reply) => {
 });
 
 // ============ API: 元信息 ============
-app.get('/api/fields', async () => ({ fields: FIELDS }));
+app.get('/api/fields', async () => ({ fields: getActiveFields() }));
 
 app.get('/api/health', async () => ({
   ok: true,
@@ -223,7 +223,7 @@ app.get('/api/customers', async (req) => {
     const nKnown = Object.entries(c.raw_known || {}).filter(([, v]) => v && String(v).trim()).length;
     const nFilled = rs.filter(r => r.status === 'filled' || r.status === 'agree').length;
     const nConflict = rs.filter(r => r.status === 'conflict').length;
-    const completeness = Math.round(((nKnown + nFilled) / FIELDS.length) * 100);
+    const completeness = Math.round(((nKnown + nFilled) / Math.max(getActiveFields().length, 1)) * 100);
     return { ...c, _stat: { nKnown, nFilled, nConflict, completeness } };
   });
 });
@@ -240,13 +240,39 @@ app.get('/api/customers/:id/report', async (req, reply) => {
   return r;
 });
 
+// 人工补充/修正字段：保存前先把当前报告存为一个版本快照，再写入 manual_fields
+app.put('/api/customers/:id/manual', async (req, reply) => {
+  const c = db.getCustomer(req.params.id);
+  if (!c) return reply.code(404).send({ error: '客户不存在' });
+  const fields = (req.body && req.body.fields) || {};
+  db.snapshotReport(req.params.id, '人工保存前');
+  const updated = db.setManualFields(req.params.id, fields);
+  return { ok: true, customer: updated, report: db.buildCustomerReport(req.params.id) };
+});
+
+// 版本列表（最近若干个快照）
+app.get('/api/customers/:id/report-versions', async (req, reply) => {
+  const c = db.getCustomer(req.params.id);
+  if (!c) return reply.code(404).send({ error: '客户不存在' });
+  const versions = db.listReportVersions(req.params.id)
+    .map(v => ({ id: v.id, label: v.label, created_at: v.created_at }));
+  return { current: db.buildCustomerReport(req.params.id), versions };
+});
+
+// 单个版本快照详情
+app.get('/api/report-versions/:vid', async (req, reply) => {
+  const v = db.getReportVersion(req.params.vid);
+  if (!v) return reply.code(404).send({ error: '版本不存在' });
+  return v;
+});
+
 app.get('/api/stats', async () => db.computeStats());
 
 // ============ API: 调研任务 ============
 app.post('/api/research', async (req, reply) => {
-  const { customer_ids, fields, models, custom_fields } = req.body || {};
+  const { customer_ids, fields, models, custom_fields, only_missing } = req.body || {};
   try {
-    const job = startResearchJob({ customer_ids, fields, models, custom_fields });
+    const job = startResearchJob({ customer_ids, fields, models, custom_fields, only_missing });
     return { ok: true, job };
   } catch (e) {
     return reply.code(400).send({ error: String(e?.message || e) });
@@ -260,9 +286,9 @@ app.post('/api/research/by-name', async (req, reply) => {
   const realCompany = String(customer_name_input || '').trim();   // 用户实际输入的公司名（可能为空）
   const appNameTrim = String(app_name || '').trim();
   const regionTrim = String(region || '').trim();
-  // 三选一校验：必须至少有一项
-  if (!fallbackName && !realCompany && !appNameTrim && !regionTrim) {
-    return reply.code(400).send({ error: '请至少填写公司名称 / APP 名称 / 展业区域 中的一项' });
+  // 校验：公司名 / APP 名 至少填一个（展业区域无法定位到具体客户，不能单独作为查询条件）
+  if (!realCompany && !appNameTrim) {
+    return reply.code(400).send({ error: '请填写公司名称或 APP 名称（展业区域不能单独作为查询条件）' });
   }
   // 客户记录的展示名:优先公司名 → 否则用 fallback (前端构造的"APP @ 区域"格式)
   const customer_name = realCompany || fallbackName || appNameTrim || regionTrim;
@@ -291,6 +317,17 @@ app.get('/api/jobs/:id', async (req, reply) => {
 });
 
 app.get('/api/jobs', async () => db.listJobs());
+
+// ============ API: 批量调研模板下载（表头 = 当前启用字段）============
+app.get('/api/template.xlsx', async (req, reply) => {
+  const out = path.join(EXPORT_DIR, `template-${Date.now()}.xlsx`);
+  await buildTemplate(out);
+  const ascii = 'template.xlsx';
+  const zh = '客户调研模板.xlsx';
+  reply.header('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(zh)}`);
+  reply.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  return fs.createReadStream(out);
+});
 
 // ============ API: 批量导出 V2 ============
 // ?ids=id1,id2  → 仅导这些客户；不传 → 导出全部
@@ -389,9 +426,79 @@ app.post('/api/models/:id/test', async (req, reply) => {
   return { ok: r.ok, latencyMs: r.latencyMs, sample: r.sample || '', error: r.error || '' };
 });
 
+// ============ API: 查询字段管理 ============
+function pickFieldInput(body) {
+  const out = {};
+  ['label','group','hint','source_note','numeric','no_research','enabled','order']
+    .forEach(k => { if (body && k in body) out[k] = body[k]; });
+  return out;
+}
+
+app.get('/api/field-defs', async () => db.listFieldDefs());
+
+// 批量导出字段定义（全部，含停用）
+app.get('/api/field-defs/export.xlsx', async (req, reply) => {
+  const defs = db.listFieldDefs();
+  const out = path.join(EXPORT_DIR, `field-defs-${Date.now()}.xlsx`);
+  await exportFieldDefs(out, defs);
+  const ascii = 'field-defs.xlsx';
+  const zh = '字段定义.xlsx';
+  reply.header('Content-Disposition', `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(zh)}`);
+  reply.type('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  return fs.createReadStream(out);
+});
+
+// 批量导入字段定义（按 key 增量 upsert，不删除现有）
+app.post('/api/field-defs/import', async (req, reply) => {
+  const part = await req.file();
+  if (!part) return reply.code(400).send({ error: '未收到文件' });
+  const savePath = path.join(UPLOAD_DIR, `fielddefs-${Date.now()}-${nanoid(6)}.xlsx`);
+  await new Promise((res, rej) => {
+    const ws = fs.createWriteStream(savePath);
+    part.file.pipe(ws);
+    ws.on('finish', res);
+    ws.on('error', rej);
+  });
+  try {
+    const rows = await parseFieldDefs(savePath);
+    if (!rows.length) return reply.code(400).send({ error: '未解析到有效字段行（中文名称必填）' });
+    const r = db.importFieldDefs(rows);
+    return { ok: true, ...r, total: rows.length };
+  } catch (e) {
+    return reply.code(400).send({ error: '导入失败：' + String(e?.message || e) });
+  }
+});
+
+app.post('/api/field-defs', async (req, reply) => {
+  const input = pickFieldInput(req.body);
+  if (!input.label || !String(input.label).trim()) return reply.code(400).send({ error: '字段中文名称必填' });
+  const f = db.createFieldDef(input);
+  return { ok: true, field: f };
+});
+
+app.put('/api/field-defs/:key', async (req, reply) => {
+  const f = db.updateFieldDef(req.params.key, pickFieldInput(req.body));
+  if (!f) return reply.code(404).send({ error: '字段不存在' });
+  return { ok: true, field: f };
+});
+
+app.delete('/api/field-defs/:key', async (req, reply) => {
+  const ok = db.deleteFieldDef(req.params.key);
+  if (!ok) return reply.code(404).send({ error: '字段不存在' });
+  return { ok: true };
+});
+
+app.post('/api/field-defs/:key/toggle', async (req, reply) => {
+  const f = db.getFieldDef(req.params.key);
+  if (!f) return reply.code(404).send({ error: '字段不存在' });
+  const updated = db.updateFieldDef(req.params.key, { enabled: !(f.enabled !== false) });
+  return { ok: true, field: updated };
+});
+
 // ============ 启动 ============
 try {
-  db.autoMigrateModels();  // 首次启动从 .env 迁移 Anthropic 配置
+  db.autoMigrateModels();      // 首次启动从 .env 迁移 Anthropic 配置
+  db.autoMigrateFieldDefs();   // 首次启动把内置 32 字段灌入 field_defs
   reloadRegistry();         // 加载已启用的模型驱动
   await app.listen({ port: PORT, host: '0.0.0.0' });
   console.log(`\n  ✅ 商务通调研系统已启动：http://localhost:${PORT}`);

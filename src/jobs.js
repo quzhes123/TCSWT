@@ -1,36 +1,48 @@
 // 任务调度：用 p-limit 控制并发，按字段 fan-out 多模型调用 researchField 并合并结果落 db.
 import pLimit from 'p-limit';
 import { researchField } from './researcher.js';
-import { FIELDS, NO_RESEARCH_FIELDS } from './field-spec.js';
 import * as db from './db.js';
+import { getActiveFields, getNoResearchKeys, getFieldByKey } from './fields.js';
 import { getDriver } from './models/registry.js';
 import { mergeMultiModel } from './merger.js';
 
 const FIELD_CONCURRENCY = parseInt(process.env.FIELD_CONCURRENCY || '4', 10);
-const LABEL_OF = Object.fromEntries(FIELDS.map(f => [f.key, f.label]));
 
 /**
  * 启动一个调研任务（异步执行；调用方拿 jobId 后轮询）
  * @param {object} args
  * @param {string[]} [args.customer_ids] - 默认全部客户
- * @param {string[]} [args.fields]       - 预定义字段 key 数组（默认全部 32 字段去掉 NO_RESEARCH_FIELDS）
+ * @param {string[]} [args.fields]       - 字段 key 数组（默认全部启用字段去掉 no_research）
  * @param {Array<{label,hint?}>} [args.custom_fields] - 自定义临时字段
  * @param {string[]} [args.models]       - 模型 id 数组（多模型并行）；缺省时取全部已启用模型
+ * @param {boolean} [args.only_missing]  - 仅调研空值/unknown 的字段（保存并更新场景，不覆盖人工修正）
  */
-export function startResearchJob({ customer_ids, fields, models, custom_fields } = {}) {
+export function startResearchJob({ customer_ids, fields, models, custom_fields, only_missing } = {}) {
   const customers = (customer_ids?.length
     ? customer_ids.map(id => db.getCustomer(id)).filter(Boolean)
     : db.listCustomers()
   );
   if (customers.length === 0) throw new Error('没有可调研的客户');
 
-  // 预定义字段
-  const targetFields = (fields && fields.length ? fields : FIELDS.map(f => f.key))
-    .filter(k => !NO_RESEARCH_FIELDS.has(k));
+  const activeFields = getActiveFields();
+  const noResearch = getNoResearchKeys();
+
+  // 预定义字段（默认全部启用字段）
+  let targetFields = (fields && fields.length ? fields : activeFields.map(f => f.key))
+    .filter(k => !noResearch.has(k));
+
+  // only_missing：保留"对至少一个选中客户仍为空/unknown"的字段（已知/已填/人工修正的跳过）
+  if (only_missing) {
+    targetFields = targetFields.filter(k => customers.some(c => {
+      const rep = db.buildCustomerReport(c.id);
+      const r = rep?.fields?.[k];
+      return !r || !r.value || String(r.value).trim() === '' || r.status === 'unknown';
+    }));
+  }
 
   // 自定义字段：清洗 + 去重
   const customSpecs = [];
-  const seen = new Set([...targetFields, ...FIELDS.map(f => f.key)]);
+  const seen = new Set([...targetFields, ...activeFields.map(f => f.key)]);
   for (const cf of (custom_fields || [])) {
     const label = String(cf?.label || '').trim();
     if (!label) continue;
@@ -45,7 +57,7 @@ export function startResearchJob({ customer_ids, fields, models, custom_fields }
   const customKeys = customSpecs.map(s => s.key);
   const customSpecMap = Object.fromEntries(customSpecs.map(s => [s.key, s]));
   const allFields = [...targetFields, ...customKeys];
-  if (allFields.length === 0) throw new Error('没有可调研的字段');
+  if (allFields.length === 0) throw new Error(only_missing ? '没有需要补充的空字段' : '没有可调研的字段');
 
   // 模型列表：前端传 models 数组（可多选），或默认取全部已启用
   let modelIds = models && models.length ? models : db.listModels({ enabledOnly: true }).map(m => m.id);
@@ -78,7 +90,7 @@ async function runJob(jobId, customers, fields, modelIds, customSpecMap = {}) {
   const drivers = modelIds.map(id => getDriver(id)).filter(Boolean);
   if (!drivers.length) throw new Error('所选模型全部无效/未加载');
 
-  const labelOf = (k) => customSpecMap[k]?.label || LABEL_OF[k] || k;
+  const labelOf = (k) => customSpecMap[k]?.label || getFieldByKey(k)?.label || k;
 
   const tasks = [];
   for (const customer of customers) {

@@ -76,9 +76,27 @@ export function normalizeHeader(s) {
     .toLowerCase();
 }
 
-/** 把 Excel 表头数组映射到 field key 数组（找不到则原样返回 label） */
-export function mapHeadersToKeys(headers) {
-  const lookup = new Map(FIELDS.map(f => [normalizeHeader(f.label), f.key]));
+/** 常见表头别名 → 字段 key（容错：不同人对同一字段的叫法。归一化后比对） */
+const HEADER_ALIASES = {
+  '客户名称': 'customer_name',
+  '公司': 'customer_name',
+  '公司名': 'customer_name',
+  'app': 'app_name',
+  'app名称': 'app_name',
+};
+
+/** 把 Excel 表头数组映射到 field key 数组（找不到则原样返回 label）
+ *  @param {Array} headers 表头文本数组
+ *  @param {Array} [fieldList] 字段定义列表（{key,label}），默认用内置 FIELDS（向后兼容）。
+ *         字段管理上线后由调用方传入 db 中的动态字段，保证表头映射随字段维护实时生效。
+ */
+export function mapHeadersToKeys(headers, fieldList = FIELDS) {
+  const lookup = new Map((fieldList || FIELDS).map(f => [normalizeHeader(f.label), f.key]));
+  // 叠加别名（仅当该 key 确实存在于字段列表中才生效）
+  const validKeys = new Set((fieldList || FIELDS).map(f => f.key));
+  for (const [alias, key] of Object.entries(HEADER_ALIASES)) {
+    if (validKeys.has(key)) lookup.set(normalizeHeader(alias), key);
+  }
   return headers.map(h => lookup.get(normalizeHeader(h)) || `__unknown:${h}`);
 }
 

@@ -2,8 +2,8 @@
 // 不再直接依赖某个 SDK；通过 src/models/driver-* 访问任意厂商。
 // 工具模式 unchanged：tools=[web_search(client), fetch_page(client), record_finding]，Node 端真正执行 web/fetch。
 
-import { FIELD_BY_KEY, NO_RESEARCH_FIELDS } from './field-spec.js';
 import { detectConflict } from './excel-io.js';
+import { getFieldByKey } from './fields.js';
 import { webSearch, fetchPage, SEARCH_ENABLED } from './serp.js';
 
 const MAX_LOOPS = 6;             // 单字段最多 agent 步数（防失控；最后一轮会强制 record_finding）
@@ -82,16 +82,19 @@ function buildSystemPrompt() {
 
 function fieldGuidance(spec) {
   const lines = [];
+  // 字段管理中维护的来源说明（喂给大模型以提升命中率）
+  if (spec.source_note) lines.push(`来源说明：${spec.source_note}`);
+  // 兼容自定义字段/旧 spec 的 sources 结构
   if (spec.sources?.primary?.length) lines.push(`优先来源：${spec.sources.primary.join('、')}`);
   if (spec.sources?.fallback?.length) lines.push(`备选来源：${spec.sources.fallback.join('、')}`);
-  if (spec.hint) lines.push(`提示：${spec.hint}`);
+  if (spec.hint) lines.push(`字段解释：${spec.hint}`);
   return lines.join('\n');
 }
 
 function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
   const ctxLines = Object.entries(customer.raw_known || {})
     .filter(([, v]) => v && String(v).trim())
-    .map(([k, v]) => `- ${FIELD_BY_KEY[k]?.label || k}: ${v}`);
+    .map(([k, v]) => `- ${getFieldByKey(k)?.label || k}: ${v}`);
   const ctx = ctxLines.length ? `\n## 客户已知信息（基准上下文，供 query 构造参考）\n${ctxLines.join('\n')}` : '';
   const guide = fieldGuidance(spec);
 
@@ -195,10 +198,10 @@ function mkResult(tool_use_id, payload) {
  * @param {object} args.driver - 来自 src/models/registry 的 driver 实例（必传）
  */
 export async function researchField({ customer, fieldKey, spec: customSpec, mode, driver }) {
-  // 优先用显式传入的 spec（自定义字段）；否则查预定义字典
-  const spec = customSpec || FIELD_BY_KEY[fieldKey];
+  // 优先用显式传入的 spec（自定义字段）；否则查字段管理中的定义
+  const spec = customSpec || getFieldByKey(fieldKey);
   if (!spec) throw new Error(`未知字段：${fieldKey}`);
-  if (NO_RESEARCH_FIELDS.has(fieldKey)) {
+  if (spec.no_research) {
     return { result: { status: 'known', value: customer.raw_known?.[fieldKey] || '' }, sources: [] };
   }
   if (!driver) throw new Error('researchField 需要 driver 实例');

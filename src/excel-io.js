@@ -3,7 +3,8 @@
 // V2: 多客户行合并为总表；冲突字段单元格红底 + 用英文分号(;)罗列；补全字段含 来源 备注列
 
 import ExcelJS from 'exceljs';
-import { FIELDS, EXCEL_COLUMN_LABELS, mapHeadersToKeys, NUMERIC_LIKE_FIELDS } from './field-spec.js';
+import { mapHeadersToKeys } from './field-spec.js';
+import { getActiveFields, getExcelLabels, isNumericLike } from './fields.js';
 
 const RED_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFCE4E4' } };
 const RED_BORDER = { style: 'thin', color: { argb: 'FFF53F3F' } };
@@ -28,7 +29,7 @@ export async function parseV1(filePath) {
   });
   if (headers.length === 0) throw new Error('表头为空');
 
-  const keys = mapHeadersToKeys(headers);
+  const keys = mapHeadersToKeys(headers, getActiveFields());
 
   const customers = [];
   for (let r = 2; r <= ws.rowCount; r++) {
@@ -60,11 +61,13 @@ export async function exportV2(filePath, customers) {
   wb.creator = '商务通客户智能调研系统';
   wb.created = new Date();
 
+  const ACTIVE_FIELDS = getActiveFields();   // ★ 动态字段（随字段管理实时变化）
+
   // ===== Sheet 1: 客户调研总表 =====
   const ws = wb.addWorksheet('客户调研总表', { views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }] });
 
-  // 表头：V1 同顺序 + 末尾追加 "模型一致性" 列
-  const HEADERS = [...EXCEL_COLUMN_LABELS, '模型一致性'];
+  // 表头：当前启用字段 label 同顺序 + 末尾追加 "模型一致性" 列
+  const HEADERS = [...getExcelLabels(), '模型一致性'];
   ws.addRow(HEADERS);
   const headerRow = ws.getRow(1);
   headerRow.font = { bold: true, color: { argb: 'FF333333' } };
@@ -73,14 +76,14 @@ export async function exportV2(filePath, customers) {
   headerRow.height = 22;
 
   for (const cust of customers) {
-    const rowVals = FIELDS.map(f => {
+    const rowVals = ACTIVE_FIELDS.map(f => {
       const r = cust.fields?.[f.key];
       if (!r) return '';
       if (r.status === 'conflict' && Array.isArray(r.values)) return r.values.filter(Boolean).join('; ');
       return r.value ?? '';
     });
     // 末尾追加 "模型一致性" 摘要：取所有有 model_summary 的字段汇总成一段（前 5 个最有信息量的）
-    const conflictFields = FIELDS.filter(f => cust.fields?.[f.key]?.status === 'conflict')
+    const conflictFields = ACTIVE_FIELDS.filter(f => cust.fields?.[f.key]?.status === 'conflict')
       .map(f => f.label).slice(0, 5);
     const summary = conflictFields.length
       ? `冲突 ${conflictFields.length} 项: ${conflictFields.join('、')}`
@@ -91,7 +94,7 @@ export async function exportV2(filePath, customers) {
     row.alignment = { vertical: 'top', wrapText: true };
 
     // 染色：冲突红底、补充绿底
-    FIELDS.forEach((f, i) => {
+    ACTIVE_FIELDS.forEach((f, i) => {
       const r = cust.fields?.[f.key];
       if (!r) return;
       const cell = row.getCell(i + 1);
@@ -121,7 +124,7 @@ export async function exportV2(filePath, customers) {
   ws2.getRow(1).font = { bold: true };
   ws2.getRow(1).fill = HEADER_FILL;
   for (const cust of customers) {
-    for (const f of FIELDS) {
+    for (const f of ACTIVE_FIELDS) {
       const r = cust.fields?.[f.key];
       if (!r || !r.sources?.length) continue;
       for (const src of r.sources) {
@@ -144,6 +147,104 @@ export async function exportV2(filePath, customers) {
 }
 
 /**
+ * 生成批量调研模板：表头 = 当前启用字段的中文名，字段解释作为表头单元格批注（鼠标悬停可见）。
+ * 不写第二行示例，避免被 parseV1 当成客户数据解析。用户填好后通过 /api/upload 上传即可批量调研。
+ */
+export async function buildTemplate(filePath) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = '商务通客户智能调研系统';
+  const ws = wb.addWorksheet('客户清单', { views: [{ state: 'frozen', ySplit: 1 }] });
+
+  const activeFields = getActiveFields();
+  const labels = activeFields.map(f => f.label);
+  ws.addRow(labels);
+  const headerRow = ws.getRow(1);
+  headerRow.font = { bold: true, color: { argb: 'FF333333' } };
+  headerRow.fill = HEADER_FILL;
+  headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
+  headerRow.height = 22;
+
+  // 字段解释 + 来源说明作为表头单元格批注（不污染数据区）
+  activeFields.forEach((f, i) => {
+    const note = [f.hint, f.source_note].filter(Boolean).join('\n');
+    if (note) headerRow.getCell(i + 1).note = note;
+    ws.getColumn(i + 1).width = Math.min(Math.max(f.label.length * 2 + 2, 14), 36);
+  });
+
+  await wb.xlsx.writeFile(filePath);
+  return filePath;
+}
+
+/** 字段管理列定义（导出/导入共用） */
+const FIELD_DEF_COLUMNS = [
+  { header: '字段Key（导入时留空=新建，勿改已有值）', key: 'key' },
+  { header: '中文名称', key: 'label' },
+  { header: '字段解释（喂给大模型）', key: 'hint' },
+  { header: '来源说明', key: 'source_note' },
+  { header: '分组', key: 'group' },
+  { header: '数值型(是/否)', key: 'numeric' },
+  { header: '参与调研(是/否)', key: 'no_research_inv' },
+  { header: '启用(是/否)', key: 'enabled' },
+];
+
+/** 导出字段定义为 xlsx（供批量编辑后再导入） */
+export async function exportFieldDefs(filePath, defs) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = '商务通客户智能调研系统';
+  const ws = wb.addWorksheet('字段定义', { views: [{ state: 'frozen', ySplit: 1 }] });
+  ws.addRow(FIELD_DEF_COLUMNS.map(c => c.header));
+  const hr = ws.getRow(1);
+  hr.font = { bold: true, color: { argb: 'FF333333' } };
+  hr.fill = HEADER_FILL;
+  hr.height = 22;
+  const yn = (b) => (b ? '是' : '否');
+  for (const f of defs) {
+    ws.addRow([
+      f.key || '', f.label || '', f.hint || '', f.source_note || '',
+      f.group || 'custom', yn(!!f.numeric), yn(f.no_research !== true), yn(f.enabled !== false),
+    ]);
+  }
+  FIELD_DEF_COLUMNS.forEach((c, i) => {
+    ws.getColumn(i + 1).width = Math.min(Math.max(c.header.length * 2, 14), 40);
+  });
+  await wb.xlsx.writeFile(filePath);
+  return filePath;
+}
+
+/** 解析导入的字段定义 xlsx，返回规范化的行对象数组（不落库，由调用方决定 upsert） */
+export async function parseFieldDefs(filePath) {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(filePath);
+  const ws = wb.worksheets[0];
+  if (!ws) throw new Error('Excel 中没有可读工作表');
+  const cellText = (cell) => {
+    let v = cell.value;
+    if (v && typeof v === 'object' && 'richText' in v) v = v.richText.map(t => t.text).join('');
+    if (v && typeof v === 'object' && 'text' in v) v = v.text;
+    return v == null ? '' : String(v).trim();
+  };
+  const isYes = (s) => /^(是|y|yes|true|1|✓)$/i.test(String(s).trim());
+  const rows = [];
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    if (!row.hasValues) continue;
+    const label = cellText(row.getCell(2));
+    if (!label) continue; // 中文名称必填，空行跳过
+    rows.push({
+      key: cellText(row.getCell(1)),
+      label,
+      hint: cellText(row.getCell(3)),
+      source_note: cellText(row.getCell(4)),
+      group: cellText(row.getCell(5)) || 'custom',
+      numeric: isYes(cellText(row.getCell(6))),
+      no_research: !isYes(cellText(row.getCell(7))), // “参与调研=是” → no_research=false
+      enabled: cellText(row.getCell(8)) === '' ? true : isYes(cellText(row.getCell(8))),
+    });
+  }
+  return rows;
+}
+
+/**
  * 字段冲突判定：把已知值 vs 调研值/或两个调研值做粗对比
  * 返回 'agree' | 'conflict' | 'unknown'
  */
@@ -153,7 +254,7 @@ export function detectConflict(fieldKey, valA, valB) {
   const b = String(valB).trim();
   if (a === b) return 'agree';
 
-  if (NUMERIC_LIKE_FIELDS.has(fieldKey)) {
+  if (isNumericLike(fieldKey)) {
     const na = parseFirstNumber(a);
     const nb = parseFirstNumber(b);
     if (na != null && nb != null) {

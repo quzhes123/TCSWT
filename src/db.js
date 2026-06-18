@@ -6,16 +6,19 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { nanoid } from 'nanoid';
 import { encrypt, decrypt } from './crypto.js';
+import { FIELDS, NUMERIC_LIKE_FIELDS, NO_RESEARCH_FIELDS } from './field-spec.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = path.resolve(__dirname, '..', 'data', 'db.json');
 
 const DEFAULT = {
-  customers: [],   // { id, customer_name, region, customer_level, ..., raw_known: {...} }
+  customers: [],   // { id, customer_name, region, customer_level, ..., raw_known: {...}, manual_fields?: {...} }
   jobs: [],        // { id, models?, customer_ids, fields, status, progress, steps, started_at, finished_at, error? }
   results: [],     // { id, job_id, customer_id, field, model?, status, value?, values?, known_value?, reason?, confidence?, is_merged?, raw_result_ids?, model_summary?, created_at }
   sources: [],     // { id, result_id, url, title, evidence }
-  models: [],      // ★ 新：模型配置（key 加密存储）
+  models: [],      // ★ 模型配置（key 加密存储）
+  field_defs: [],  // ★ 字段定义（中文名/解释/来源说明/分组/启停/顺序），由 field-spec 首次迁移
+  report_versions: [], // ★ 报告版本快照 { id, customer_id, label, fields, created_at }
 };
 
 let _state = null;
@@ -209,6 +212,19 @@ export function buildCustomerReport(customer_id) {
     if (fieldMap[k]) continue;
     if (v) fieldMap[k] = { status: 'known', value: v, sources: [], model_summary: '', raw_results: [] };
   }
+  // ★ 人工补充/修正：最高优先级，覆盖以上任何来源，status 标 'manual'
+  for (const [k, v] of Object.entries(cust.manual_fields || {})) {
+    const val = v == null ? '' : String(v);
+    fieldMap[k] = {
+      ...(fieldMap[k] || {}),
+      status: 'manual',
+      value: val,
+      values: null,
+      sources: (fieldMap[k]?.sources) || [],
+      model_summary: '人工补充',
+      manual: true,
+    };
+  }
   return { customer: cust, fields: fieldMap };
 }
 
@@ -345,6 +361,159 @@ export function recordModelTest(id, ok, errorMsg = '') {
   m.last_test_error = ok ? '' : String(errorMsg).slice(0, 300);
   persist();
   return publicModel(m);
+}
+
+// ========== 客户人工补充字段 ==========
+/** 设置/合并客户的人工补充字段（manual_fields），返回更新后的客户 */
+export function setManualFields(customer_id, patch) {
+  const s = load();
+  const c = s.customers.find(x => x.id === customer_id);
+  if (!c) return null;
+  c.manual_fields = { ...(c.manual_fields || {}) };
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v == null || String(v).trim() === '') delete c.manual_fields[k];
+    else c.manual_fields[k] = String(v);
+  }
+  persist();
+  return c;
+}
+
+// ========== 报告版本快照 ==========
+/** 把当前客户报告存为一个版本快照（用于版本对比）。label 用于区分触发来源。 */
+export function snapshotReport(customer_id, label = '') {
+  const s = load();
+  const report = buildCustomerReport(customer_id);
+  if (!report) return null;
+  const snap = {
+    id: 'v_' + nanoid(8),
+    customer_id,
+    label: String(label || '').slice(0, 40),
+    fields: report.fields,
+    created_at: Date.now(),
+  };
+  s.report_versions.unshift(snap);
+  // 每个客户最多保留 20 个版本，防止无限增长
+  const own = s.report_versions.filter(v => v.customer_id === customer_id);
+  if (own.length > 20) {
+    const keep = new Set(own.slice(0, 20).map(v => v.id));
+    s.report_versions = s.report_versions.filter(v => v.customer_id !== customer_id || keep.has(v.id));
+  }
+  persist();
+  return snap;
+}
+export function listReportVersions(customer_id) {
+  return load().report_versions.filter(v => v.customer_id === customer_id);
+}
+export function getReportVersion(id) {
+  return load().report_versions.find(v => v.id === id);
+}
+
+// ========== 字段定义（查询字段管理）==========
+const VALID_GROUPS = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+
+export function listFieldDefs({ activeOnly = false } = {}) {
+  let arr = load().field_defs.slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
+  if (activeOnly) arr = arr.filter(f => f.enabled !== false);
+  return arr;
+}
+export function getFieldDef(key) {
+  return load().field_defs.find(f => f.key === key);
+}
+export function createFieldDef(input) {
+  const s = load();
+  const now = Date.now();
+  const maxOrder = s.field_defs.reduce((m, f) => Math.max(m, f.order ?? 0), 0);
+  const f = {
+    key: 'f_' + nanoid(8),
+    label: String(input.label || '').trim() || '未命名字段',
+    group: VALID_GROUPS.includes(input.group) ? input.group : 'custom',
+    hint: String(input.hint || '').trim(),
+    source_note: String(input.source_note || '').trim(),
+    numeric: !!input.numeric,
+    no_research: !!input.no_research,
+    enabled: input.enabled !== false,
+    builtin: false,
+    order: maxOrder + 1,
+    created_at: now,
+    updated_at: now,
+  };
+  s.field_defs.push(f);
+  persist();
+  return f;
+}
+export function updateFieldDef(key, patch) {
+  const s = load();
+  const f = s.field_defs.find(x => x.key === key);
+  if (!f) return null;
+  for (const k of ['label','group','hint','source_note','numeric','no_research','enabled','order']) {
+    if (k in patch) f[k] = patch[k];
+  }
+  if (patch.group && !VALID_GROUPS.includes(patch.group)) f.group = 'custom';
+  f.updated_at = Date.now();
+  persist();
+  return f;
+}
+export function deleteFieldDef(key) {
+  const s = load();
+  const before = s.field_defs.length;
+  s.field_defs = s.field_defs.filter(f => f.key !== key);
+  if (s.field_defs.length === before) return false;
+  persist();
+  return true;
+}
+
+/** 批量导入字段定义：按 key 增量 upsert（有 key 且存在→更新；否则新建）。不删除现有字段。
+ *  @param {Array} rows 来自 parseFieldDefs 的规范化行
+ *  @returns {{created:number, updated:number}}
+ */
+export function importFieldDefs(rows) {
+  let created = 0, updated = 0;
+  for (const row of (rows || [])) {
+    const patch = {
+      label: row.label, hint: row.hint || '', source_note: row.source_note || '',
+      group: row.group || 'custom', numeric: !!row.numeric,
+      no_research: !!row.no_research, enabled: row.enabled !== false,
+    };
+    if (row.key && getFieldDef(row.key)) {
+      updateFieldDef(row.key, patch);
+      updated++;
+    } else {
+      createFieldDef(patch);
+      created++;
+    }
+  }
+  return { created, updated };
+}
+
+/** 启动时自动迁移：仅当 db 中无任何 field_def 时，把 field-spec.js 的 FIELDS 灌入。
+ *  把 sources.primary/fallback 拼成 source_note 文本，NUMERIC_LIKE_FIELDS→numeric，
+ *  NO_RESEARCH_FIELDS→no_research，全部标 builtin:true（可改可停，删除给二次确认）。
+ */
+export function autoMigrateFieldDefs() {
+  const s = load();
+  if (s.field_defs.length > 0) return null;
+  s.field_defs = FIELDS.map((f, i) => {
+    const parts = [];
+    if (f.sources?.primary?.length) parts.push('优先来源：' + f.sources.primary.join('、'));
+    if (f.sources?.fallback?.length) parts.push('备选来源：' + f.sources.fallback.join('、'));
+    return {
+      key: f.key,
+      label: f.label,
+      group: f.group || 'meta',
+      hint: f.hint || '',
+      source_note: parts.join('；'),
+      numeric: NUMERIC_LIKE_FIELDS.has(f.key),
+      no_research: NO_RESEARCH_FIELDS.has(f.key),
+      enabled: true,
+      builtin: true,
+      order: i,
+      created_at: Date.now(),
+      updated_at: Date.now(),
+    };
+  });
+  persist();
+  console.log(`[autoMigrate] 已灌入 ${s.field_defs.length} 个内置字段定义到 field_defs`);
+  return s.field_defs.length;
 }
 
 /** 启动时自动迁移：仅当 db 中无任何 model 且 .env 配置了 ANTHROPIC_* 时，建一条默认记录。
