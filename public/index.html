@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#165DFF">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <title>商务通 · 客户智能调研系统</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/logo.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
@@ -100,8 +102,8 @@
            :class="mobileNav ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
       <!-- Logo -->
       <div class="px-5 py-5 flex items-center gap-3 border-b border-[#f0f1f4]">
-        <div class="w-9 h-9 bg-[#165DFF] rounded-xl flex items-center justify-center text-white shadow-sm">
-          <i class="fas fa-magnifying-glass-chart"></i>
+        <div class="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center shadow-sm">
+          <img src="/logo.png" alt="商务通" class="w-full h-full object-cover" />
         </div>
         <div class="leading-tight">
           <div class="text-[15px] font-bold text-gray-800">商务通</div>
