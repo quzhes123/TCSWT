@@ -234,6 +234,13 @@ app.get('/api/customers/:id', async (req, reply) => {
   return c;
 });
 
+// 删除客户（连同其调研结果、来源、报告版本）
+app.delete('/api/customers/:id', async (req, reply) => {
+  const ok = db.deleteCustomer(req.params.id);
+  if (!ok) return reply.code(404).send({ error: '客户不存在' });
+  return { ok: true };
+});
+
 app.get('/api/customers/:id/report', async (req, reply) => {
   const r = db.buildCustomerReport(req.params.id);
   if (!r) return reply.code(404).send({ error: '客户不存在' });

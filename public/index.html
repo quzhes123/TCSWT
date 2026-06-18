@@ -521,6 +521,7 @@
                   </td>
                   <td class="px-4 py-3 text-center cell-action whitespace-nowrap">
                     <button class="text-[#165DFF] hover:underline text-sm font-medium mr-3" @click.stop="openReport(c.id)" title="查看报告"><i class="fas fa-file-lines mr-1"></i>查看</button>
+                    <button class="text-red-500 hover:underline text-sm font-medium mr-3" @click.stop="delCustomer(c)" title="删除该客户及其调研数据"><i class="fas fa-trash mr-1"></i>删除</button>
                     <a class="text-[#165DFF] hover:underline text-sm font-medium" :href="`/api/customers/${c.id}/export.xlsx`" target="_blank" @click.stop title="导出该客户的调研报告 Excel"><i class="fas fa-download mr-1"></i>导出</a>
                   </td>
                 </tr>
@@ -904,16 +905,25 @@
           <label class="text-xs text-gray-500">来源说明（去哪查，会喂给大模型）</label>
           <textarea x-model="fieldForm.source_note" rows="2" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如：企查查注册地址 / 工商登记地 / 官网备案"></textarea>
         </div>
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-2 gap-3 items-start">
           <div>
             <label class="text-xs text-gray-500">分组</label>
             <select x-model="fieldForm.group" class="mt-1 w-full border rounded px-3 py-2 text-sm">
-              <template x-for="(lbl,g) in groupLabels" :key="g">
-                <option :value="g" x-text="lbl"></option>
+              <template x-for="g in groupOptions" :key="g.key">
+                <option :value="g.key" x-text="g.label"></option>
               </template>
+              <option value="__new__">＋ 新建自定义分组…</option>
             </select>
+            <template x-if="fieldForm.group === '__new__'">
+              <div class="mt-2">
+                <input type="text" x-model="fieldForm.customGroup" maxlength="30"
+                       placeholder="输入新分组名称（不能与已有分组重复）"
+                       class="w-full border rounded px-3 py-2 text-sm focus:border-[#165DFF] outline-none">
+                <div class="text-[10px] text-red-500 mt-0.5" x-show="fieldGroupError" x-text="fieldGroupError"></div>
+              </div>
+            </template>
           </div>
-          <div class="flex items-end gap-4 pb-1">
+          <div class="flex items-end gap-4 pb-1 mt-5">
             <label class="flex items-center gap-1.5 text-sm text-gray-600"><input type="checkbox" x-model="fieldForm.numeric" class="rounded">数值型</label>
             <label class="flex items-center gap-1.5 text-sm text-gray-600"><input type="checkbox" x-model="fieldForm.enabled" class="rounded">启用</label>
           </div>
@@ -985,7 +995,8 @@ function app() {
     fieldImporting: false,
     _fieldFromWorkspace: false,
     fieldMgmtCollapsed: {},   // 字段管理列表：分组折叠状态
-    fieldForm: { key: '', label: '', hint: '', source_note: '', group: 'custom', numeric: false, enabled: true },
+    fieldForm: { key: '', label: '', hint: '', source_note: '', group: 'custom', numeric: false, enabled: true, customGroup: '' },
+    fieldGroupError: '',
     job: null, _pollTimer: null,
     report: null, reportOpen: false,
     // 报告人工编辑 / 版本对比
@@ -1030,28 +1041,57 @@ function app() {
       } catch (e) { this.notify('加载字段失败: ' + e, 'err'); }
     },
     openFieldNew(fromWorkspace = false) {
-      this.fieldForm = { key: '', label: '', hint: '', source_note: '', group: 'custom', numeric: false, enabled: true };
+      this.fieldForm = { key: '', label: '', hint: '', source_note: '', group: 'custom', numeric: false, enabled: true, customGroup: '' };
+      this.fieldGroupError = '';
       this._fieldFromWorkspace = fromWorkspace;   // 工作台新增时：保存后自动选中
       this.fieldModalOpen = true;
     },
     openFieldEdit(f) {
       this._fieldFromWorkspace = false;
+      this.fieldGroupError = '';
       this.fieldForm = {
         key: f.key, label: f.label || '', hint: f.hint || '', source_note: f.source_note || '',
-        group: f.group || 'custom', numeric: !!f.numeric, enabled: f.enabled !== false,
+        group: f.group || 'custom', numeric: !!f.numeric, enabled: f.enabled !== false, customGroup: '',
       };
       this.fieldModalOpen = true;
     },
+    // 分组下拉选项：标准分组 + 已存在的自定义分组（从 fieldDefs 发现）
+    get groupOptions() {
+      const std = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      const seen = new Set(std);
+      const opts = std.map(k => ({ key: k, label: this.groupLabels[k] || k }));
+      for (const f of this.fieldDefs) {
+        const g = f.group || 'meta';
+        if (!seen.has(g)) { seen.add(g); opts.push({ key: g, label: this.groupLabels[g] || g }); }
+      }
+      return opts;
+    },
     async saveFieldDef() {
       if (!this.fieldForm.label.trim()) { this.notify('请填写中文名称', 'err'); return; }
+      // 解析分组：新建自定义分组时校验非空且不与已有分组重名
+      let group = this.fieldForm.group;
+      this.fieldGroupError = '';
+      if (group === '__new__') {
+        const name = (this.fieldForm.customGroup || '').trim();
+        if (!name) { this.fieldGroupError = '请输入新分组名称'; return; }
+        const norm = (s) => String(s).trim().toLowerCase();
+        const taken = new Set();
+        this.groupOptions.forEach(o => { taken.add(norm(o.key)); taken.add(norm(o.label)); });
+        if (taken.has(norm(name))) { this.fieldGroupError = '该分组名称已存在，请直接在上方下拉选择'; return; }
+        group = name;
+      }
       this.fieldSaving = true;
       try {
         const isEdit = !!this.fieldForm.key;
         const url = isEdit ? '/api/field-defs/' + this.fieldForm.key : '/api/field-defs';
+        const payload = {
+          label: this.fieldForm.label, hint: this.fieldForm.hint, source_note: this.fieldForm.source_note,
+          group, numeric: this.fieldForm.numeric, enabled: this.fieldForm.enabled,
+        };
         const r = await fetch(url, {
           method: isEdit ? 'PUT' : 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(this.fieldForm),
+          body: JSON.stringify(payload),
         });
         const j = await r.json();
         if (!r.ok) throw new Error(j.error || '保存失败');
@@ -1416,6 +1456,19 @@ function app() {
       this.reportEditMode = false; this.reportDraft = {}; this.diffMap = {}; this.diffActive = false;
       this.report = await fetch(`/api/customers/${id}/report`).then(r => r.json());
       this.reportOpen = true;
+    },
+    async delCustomer(c) {
+      if (!confirm(`确认删除客户「${c.customer_name || c.id}」？将一并删除其调研结果与历史版本，且不可恢复。`)) return;
+      try {
+        const r = await fetch(`/api/customers/${c.id}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        if (!r.ok) throw new Error((await r.json()).error || '删除失败');
+        // 若正打开该客户报告则关闭
+        if (this.report?.customer?.id === c.id) this.reportOpen = false;
+        this.selectedIds = this.selectedIds.filter(id => id !== c.id);
+        await this.loadAll();
+        this.notify('客户已删除', 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
     },
 
     // 进入人工编辑：把当前各字段值灌进 reportDraft

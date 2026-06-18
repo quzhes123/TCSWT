@@ -90,6 +90,20 @@ export function clearAll() {
   persist();
 }
 
+/** 删除单个客户及其全部关联数据（调研结果、来源、报告版本）。 */
+export function deleteCustomer(id) {
+  const s = load();
+  const before = s.customers.length;
+  s.customers = s.customers.filter(c => c.id !== id);
+  if (s.customers.length === before) return false;
+  const deadResultIds = new Set(s.results.filter(r => r.customer_id === id).map(r => r.id));
+  s.results = s.results.filter(r => r.customer_id !== id);
+  s.sources = s.sources.filter(src => !deadResultIds.has(src.result_id));
+  s.report_versions = (s.report_versions || []).filter(v => v.customer_id !== id);
+  persist();
+  return true;
+}
+
 // ========== Jobs ==========
 export function createJob(job) {
   const s = load();
@@ -410,6 +424,11 @@ export function getReportVersion(id) {
 
 // ========== 字段定义（查询字段管理）==========
 const VALID_GROUPS = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+/** 分组允许标准 key，也允许用户自定义分组名（中文等任意非空串，≤30 字）。空则归入 custom。 */
+function sanitizeGroup(g) {
+  const s = String(g == null ? '' : g).trim().slice(0, 30);
+  return s || 'custom';
+}
 
 export function listFieldDefs({ activeOnly = false } = {}) {
   let arr = load().field_defs.slice().sort((a, b) => (a.order ?? 999) - (b.order ?? 999));
@@ -426,7 +445,7 @@ export function createFieldDef(input) {
   const f = {
     key: 'f_' + nanoid(8),
     label: String(input.label || '').trim() || '未命名字段',
-    group: VALID_GROUPS.includes(input.group) ? input.group : 'custom',
+    group: sanitizeGroup(input.group),
     hint: String(input.hint || '').trim(),
     source_note: String(input.source_note || '').trim(),
     numeric: !!input.numeric,
@@ -448,7 +467,7 @@ export function updateFieldDef(key, patch) {
   for (const k of ['label','group','hint','source_note','numeric','no_research','enabled','order']) {
     if (k in patch) f[k] = patch[k];
   }
-  if (patch.group && !VALID_GROUPS.includes(patch.group)) f.group = 'custom';
+  if ('group' in patch) f.group = sanitizeGroup(patch.group);
   f.updated_at = Date.now();
   persist();
   return f;
