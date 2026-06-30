@@ -224,7 +224,9 @@ app.get('/api/customers', async (req) => {
     const nFilled = rs.filter(r => r.status === 'filled' || r.status === 'agree').length;
     const nConflict = rs.filter(r => r.status === 'conflict').length;
     const completeness = Math.round(((nKnown + nFilled) / Math.max(getActiveFields().length, 1)) * 100);
-    return { ...c, _stat: { nKnown, nFilled, nConflict, completeness } };
+    // 列表显示名 = 报告里的最新公司名称（人工修正 > 调研合并 > 原始输入 > 兜底），保证两处一致
+    const customer_name = db.resolveDisplayName(c);
+    return { ...c, customer_name, _stat: { nKnown, nFilled, nConflict, completeness } };
   });
 });
 

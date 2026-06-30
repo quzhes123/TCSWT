@@ -240,7 +240,38 @@ export function buildCustomerReport(customer_id) {
       manual: true,
     };
   }
-  return { customer: cust, fields: fieldMap };
+  // 补上「最新公司名称」，与客户列表口径一致（人工修正 > 调研合并 > 原始输入 > 兜底）
+  const display_name = resolveDisplayName(cust);
+  return { customer: { ...cust, customer_name: display_name }, fields: fieldMap };
+}
+
+/** 解析客户「最新公司名称」：与报告口径一致。
+ *  优先级：人工修正 manual_fields.customer_name
+ *        > 调研合并结论 customer_name（filled/agree/conflict 有有效 value）
+ *        > 用户原始输入 raw_known.customer_name
+ *        > 客户记录显示名（创建时的兜底名）
+ *  用于「客户列表」与「报告标题」共用，避免两处不一致。
+ */
+export function resolveDisplayName(customer_id) {
+  const cust = typeof customer_id === 'object' ? customer_id : getCustomer(customer_id);
+  if (!cust) return '';
+  const pick = (v) => (v == null ? '' : String(v).trim());
+  // 1) 人工修正最高优先
+  const manual = pick(cust.manual_fields?.customer_name);
+  if (manual) return manual;
+  // 2) 调研合并结论（取 is_merged 的 customer_name 字段）
+  const results = getResultsByCustomer(cust.id);
+  const merged = results.find(r => r.is_merged && r.field === 'customer_name')
+              || results.find(r => r.field === 'customer_name');
+  if (merged && ['filled', 'agree', 'conflict'].includes(merged.status)) {
+    const mv = pick(merged.value);
+    if (mv) return mv;
+  }
+  // 3) 用户原始输入
+  const known = pick(cust.raw_known?.customer_name);
+  if (known) return known;
+  // 4) 兜底：记录显示名
+  return pick(cust.customer_name);
 }
 
 // ========== 看板统计 ==========

@@ -493,7 +493,6 @@
                 <th class="px-4 py-3">客户名称</th>
                 <th class="px-4 py-3">APP</th>
                 <th class="px-4 py-3">展业区域</th>
-                <th class="px-4 py-3">等级</th>
                 <th class="px-4 py-3">业务线</th>
                 <th class="px-4 py-3">产品</th>
                 <th class="px-4 py-3">调研完整度</th>
@@ -511,7 +510,6 @@
                   <td class="px-4 py-3 cell-main" data-label="客户名称"><div class="font-medium" x-text="c.customer_name"></div></td>
                   <td class="px-4 py-3" data-label="APP" x-text="c.raw_known?.app_name || '—'"></td>
                   <td class="px-4 py-3" data-label="区域" x-text="c.region || '—'"></td>
-                  <td class="px-4 py-3" data-label="等级"><span class="tag tag-blue" x-text="c.customer_level || '—'"></span></td>
                   <td class="px-4 py-3" data-label="业务线" x-text="c.business_line || '—'"></td>
                   <td class="px-4 py-3" data-label="产品" x-text="c.product_type || '—'"></td>
                   <td class="px-4 py-3" data-label="完整度">
@@ -532,7 +530,7 @@
                   </td>
                 </tr>
               </template>
-              <tr x-show="customers.length===0"><td colspan="10" class="text-center text-gray-400 py-8">暂无客户，请先到「智能调研」上传 V1.xlsx 或键入公司名称</td></tr>
+              <tr x-show="customers.length===0"><td colspan="9" class="text-center text-gray-400 py-8">暂无客户，请先到「智能调研」上传 V1.xlsx 或键入公司名称</td></tr>
             </tbody>
           </table>
         </div>
