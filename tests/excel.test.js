@@ -47,10 +47,10 @@ test('exportV2: 写 V2 总表，冲突字段红底', async () => {
       fields: {
         customer_name:  { value: '众米科技（微米）',         status: 'known' },
         region:         { value: '墨西哥',                  status: 'known' },
-        customer_level: { value: '重要客户',                status: 'known' },
+        business_line:  { value: '现金贷',                  status: 'known' },
         product_type:   { value: '现金贷',                  status: 'known' },
         cust_total:     { value: '约120万',                  status: 'filled', sources: [{ url: 'https://example.com/36kr', title: '36氪报道' }] },
-        bad_debt_rate:  { values: ['约20%', '约15%'],        status: 'conflict',
+        monthly_loans:  { values: ['约20万', '约15万'],        status: 'conflict',
                           sources: [{ url: 'https://example.com/yj1', title: '行业报告' },
                                     { url: 'https://example.com/yj2', title: '年报推算' }] },
       }
@@ -65,12 +65,12 @@ test('exportV2: 写 V2 总表，冲突字段红底', async () => {
   const ws = wb.getWorksheet('客户调研总表');
   assert.ok(ws, 'sheet1 存在');
   assert.equal(ws.getRow(1).cellCount, getActiveFields().length + 1);
-  // 找 "坏账率" 列号
+  // 找 "月放款笔数" 列号（冲突字段）
   let badDebtCol = -1;
-  ws.getRow(1).eachCell((cell, col) => { if (String(cell.value) === '坏账率') badDebtCol = col; });
+  ws.getRow(1).eachCell((cell, col) => { if (String(cell.value) === '月放款笔数') badDebtCol = col; });
   assert.ok(badDebtCol > 0);
   const cell = ws.getRow(2).getCell(badDebtCol);
-  assert.match(String(cell.value), /约20%; 约15%/);
+  assert.match(String(cell.value), /约20万; 约15万/);
   assert.equal(cell.fill?.fgColor?.argb, 'FFFCE4E4', '冲突单元格应为红底');
 
   // sheet2 来源数 ≥ 3

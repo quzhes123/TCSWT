@@ -110,11 +110,16 @@ export function mergeMultiModel({ fieldKey, knownValue, modelResults }) {
 
   // 全空：所有模型都 unknown
   if (candidates.length === 0) {
+    // model_summary 保持简短（报告小字用）；reason 保留模型写的详细原因（试了什么/为何失败/建议查哪）
     const summary = (modelResults || []).map(r => `${r.modelName || r.modelId}: 未找到`).join('；') || '无模型参与';
+    const detailed = (modelResults || [])
+      .filter(r => r.reason && r.reason.trim() && !/^未找到$/.test(r.reason.trim()))
+      .map(r => `【${r.modelName || r.modelId}】${r.reason.trim()}`)
+      .join('\n');
     return {
       status: 'unknown',
       value: '待补充',
-      reason: summary,
+      reason: detailed || summary,
       sources: [],
       model_summary: summary,
       participants: (modelResults || []).map(r => ({ name: r.modelName || r.modelId, status: 'unknown', value: '' })),

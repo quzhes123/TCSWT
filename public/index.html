@@ -318,20 +318,22 @@
                 <button class="text-xs text-[#165DFF] hover:underline" @click.stop="toggleGroup(items)"
                         x-text="isGroupAllSelected(items) ? '取消本组' : '全选本组'"></button>
               </div>
-              <!-- 分组内字段：chip 风格 -->
-              <div x-show="!fieldGroupCollapsed[group]" class="p-3 flex flex-wrap gap-2">
+              <!-- 分组内字段：紧凑网格布局 -->
+              <div x-show="!fieldGroupCollapsed[group]" class="p-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
                 <template x-for="f in items" :key="f.key">
                   <button type="button"
                           @click="!disabledFields.includes(f.key) && toggleField(f.key)"
                           :disabled="disabledFields.includes(f.key)"
-                          class="px-3 py-1.5 rounded-full text-xs border transition-colors flex items-center gap-1.5"
+                          :title="f.label"
+                          class="px-2.5 py-1.5 rounded-md text-xs border transition-all flex items-center gap-1.5 w-full text-left"
                           :class="disabledFields.includes(f.key)
-                            ? 'opacity-40 cursor-not-allowed border-gray-200 text-gray-400'
+                            ? 'opacity-40 cursor-not-allowed border-gray-200 text-gray-400 bg-gray-50'
                             : (selectedFields.includes(f.key)
-                                ? 'bg-blue-50 border-[#165DFF] text-[#165DFF] font-medium'
-                                : 'border-gray-200 text-gray-600 hover:border-[#165DFF] hover:text-[#165DFF]')">
-                    <i class="fas text-[10px]" :class="selectedFields.includes(f.key) ? 'fa-circle-check' : 'fa-circle'"></i>
-                    <span x-text="f.label"></span>
+                                ? 'bg-[#165DFF] border-[#165DFF] text-white font-medium shadow-sm'
+                                : 'bg-white border-gray-200 text-gray-600 hover:border-[#165DFF] hover:bg-blue-50/40 hover:text-[#165DFF]')">
+                    <i class="fas text-[11px] flex-shrink-0"
+                       :class="selectedFields.includes(f.key) ? 'fa-circle-check' : 'fa-circle text-gray-300'"></i>
+                    <span class="truncate" x-text="f.label"></span>
                   </button>
                 </template>
               </div>
@@ -784,16 +786,34 @@
                   </div>
                 </template>
 
-                <!-- 编辑模式：可编辑输入框 -->
+                <!-- 编辑模式（批量）：可编辑输入框 -->
                 <template x-if="reportEditMode">
                   <input type="text" x-model="reportDraft[f.key]"
                          class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#165DFF] focus:ring-1 focus:ring-[#165DFF]/20 outline-none"
                          :placeholder="f.label">
                 </template>
 
+                <!-- 单字段行内编辑：双击触发，仅当前字段进入编辑 -->
+                <template x-if="!reportEditMode && editingKey === f.key">
+                  <div class="space-y-1.5" @click.stop @dblclick.stop>
+                    <input type="text" x-model="editDraft" :placeholder="f.label"
+                           x-init="$nextTick(() => $el.focus())"
+                           @keydown.enter="saveFieldEdit(f)" @keydown.escape="cancelFieldEdit()"
+                           class="w-full border border-[#165DFF] rounded px-2 py-1 text-sm focus:ring-1 focus:ring-[#165DFF]/20 outline-none">
+                    <div class="flex items-center gap-2">
+                      <button @click="saveFieldEdit(f)" :disabled="editSaving"
+                              class="text-xs px-3 py-1 rounded bg-[#165DFF] text-white hover:bg-blue-600 disabled:opacity-60 flex items-center gap-1">
+                        <i class="fas" :class="editSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+                      </button>
+                      <button @click="cancelFieldEdit()" class="text-xs px-2 py-1 text-gray-500 hover:text-gray-700">取消</button>
+                      <span class="text-[10px] text-gray-400 ml-auto">Enter 保存 · Esc 取消</span>
+                    </div>
+                  </div>
+                </template>
+
                 <!-- 查看模式 -->
-                <template x-if="!reportEditMode">
-                  <div @dblclick="startEditField(f)" class="cursor-text">
+                <template x-if="!reportEditMode && editingKey !== f.key">
+                  <div @dblclick="startEditField(f)" class="cursor-text" title="双击编辑此字段">
                     <template x-if="f.r?.status==='conflict'">
                       <div class="space-y-1">
                         <!-- 非校验态：展示各值 + 快速校验入口 -->
@@ -848,8 +868,8 @@
                 </template>
 
                 <div class="text-[11px] text-gray-500 mt-1" x-show="!reportEditMode" x-text="f.r?.reason || ''"></div>
-                <!-- 模型一致性 -->
-                <template x-if="!reportEditMode && f.r?.model_summary">
+                <!-- 模型一致性：仅多模型并行时展示（单模型时 reason 已足够，避免重复）-->
+                <template x-if="!reportEditMode && f.r?.model_summary && (f.r?.raw_results?.length > 1)">
                   <div class="text-[10px] text-gray-400 mt-0.5 border-t border-gray-200 pt-1"
                        :title="'原始模型输出:\n' + (f.r?.raw_results||[]).map(rr => rr.model + ': ' + (rr.value || 'unknown')).join('\n')">
                     <i class="fas fa-microchip mr-1"></i><span x-text="f.r.model_summary"></span>
@@ -1094,6 +1114,9 @@ function app() {
     reportEditMode: false,
     reportDraft: {},
     reportSaving: false,
+    editingKey: null,   // 双击单字段行内编辑：当前正在编辑的字段 key
+    editDraft: '',      // 单字段编辑的草稿值
+    editSaving: false,
     diffMap: {},        // { fieldKey: { old } } 仅含变化项
     diffActive: false,
     resolvingKey: null, // 正在快速校验的冲突字段 key
@@ -1601,8 +1624,31 @@ function app() {
       this.diffActive = false; this.diffMap = {};
     },
     startEditField(f) {
-      if (this.reportEditMode) return;
-      this.enterReportEdit();
+      if (this.reportEditMode) return;       // 批量编辑态下不触发单字段编辑
+      this.editingKey = f.key;
+      // 取当前值作为初始草稿（冲突字段取第一个值）
+      const r = f.r || {};
+      this.editDraft = r.value || (r.values && r.values[0]) || '';
+    },
+    cancelFieldEdit() { this.editingKey = null; this.editDraft = ''; },
+    async saveFieldEdit(f) {
+      const id = this.report?.customer?.id;
+      if (!id || !this.editingKey) return;
+      const val = (this.editDraft || '').trim();
+      this.editSaving = true;
+      try {
+        const r = await fetch(`/api/customers/${id}/manual`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { [f.key]: val } }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.report = j.report;
+        this.editingKey = null;
+        this.editDraft = '';
+        this.notify(`「${f.label}」已更新`, 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.editSaving = false; }
     },
     cancelReportEdit() { this.reportEditMode = false; this.reportDraft = {}; },
 
