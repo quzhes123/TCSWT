@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#165DFF">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>商务通 · 客户智能调研系统</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/logo.png">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-thumb { background: #d4d7dd; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #b8bcc4; }
+
+    /* 侧边导航 */
+    .nav-item { display:flex; align-items:center; gap:12px; padding:10px 14px; margin:2px 10px; border-radius:10px; cursor:pointer; color:#5b6472; font-size:14px; transition:all .18s; position:relative; }
+    .nav-item:hover { background:#f1f3f7; color:#1f2733; }
+    .nav-item.active { background:#eef3ff; color:#165DFF; font-weight:600; }
+    .nav-item.active::before { content:''; position:absolute; left:-10px; top:50%; transform:translateY(-50%); width:3px; height:20px; border-radius:0 3px 3px 0; background:#165DFF; }
+    .nav-item i { width:18px; text-align:center; font-size:15px; }
+    .nav-sub { font-size:11px; color:#9aa1ad; }
+
+    .cell-known { background: #fff; }
+    .cell-filled { background: rgba(0,180,42,0.08); border-left: 3px solid #00B42A; }
+    .cell-conflict { background: rgba(245,63,63,0.1); border: 1px solid rgba(245,63,63,0.4); }
+    .cell-unknown { background: #f7f8fa; color: #999; }
+    .src-tag { display:inline-block; margin-top:3px; font-size:11px; color:#d97706; background:rgba(245,158,11,0.1); padding:1px 6px; border-radius:4px; }
+    .progress-track { background: #eef1f5; border-radius: 999px; height: 6px; overflow: hidden; }
+    .progress-bar { height: 100%; background: linear-gradient(90deg,#165DFF,#00B42A); transition: width .3s; }
+    [x-cloak] { display: none !important; }
+    .fade-enter { transition: opacity .15s, transform .15s; }
+    .drawer { transition: transform .25s ease; }
+    .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
+    .tag-blue { background: rgba(22,93,255,0.1); color: #165DFF; }
+    .tag-green { background: rgba(0,180,42,0.12); color: #00B42A; }
+    .tag-amber { background: rgba(245,158,11,0.12); color: #d97706; }
+    .tag-red { background: rgba(245,63,63,0.1); color: #F53F3F; }
+    .tag-gray { background: #F5F7FA; color: #666; }
+    .card { background:#fff; border:1px solid #eceef2; border-radius:14px; }
+    .page-title { font-size:20px; font-weight:700; letter-spacing:-.01em; }
+
+    /* 移动端微调 */
+    @media (max-width: 767px) {
+      .page-title { font-size: 16px; }
+      .nav-item { margin: 2px 0; padding: 12px 16px; border-radius: 0; font-size: 15px; }
+      .nav-item.active::before { display: none; }
+      .src-tag { max-width: 100%; word-break: break-all; }
+    }
+    /* 移动端：把客户表格改成卡片布局 */
+    @media (max-width: 640px) {
+      table.responsive-table thead { display: none; }
+      table.responsive-table tr { display: block; padding: 12px 14px; border-bottom: 1px solid #f0f1f4; }
+      table.responsive-table td { display: flex; justify-content: space-between; align-items: flex-start; padding: 4px 0; border: none; gap: 12px; }
+      table.responsive-table td::before { content: attr(data-label); color: #9aa1ad; font-size: 12px; flex-shrink: 0; min-width: 70px; }
+      table.responsive-table td.cell-main { display: block; padding-bottom: 8px; border-bottom: 1px dashed #eceef2; margin-bottom: 6px; }
+      table.responsive-table td.cell-main::before { display: none; }
+      table.responsive-table td.cell-action { justify-content: flex-end; padding-top: 8px; }
+      table.responsive-table td.cell-action::before { display: none; }
+    }
+  </style>
+</head>
+<body class="bg-[#f7f8fa] text-gray-800" x-data="app()" x-cloak x-init="init()">
+
+  <!-- 全局 JS 错误捕获:防止"按钮点了没反应"无声失败 -->
+  <script>
+    window.addEventListener('error', e => {
+      try { console.error('[GLOBAL ERROR]', e.message, e.error); } catch {}
+      const div = document.createElement('div');
+      div.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#dc2626;color:#fff;padding:12px 20px;z-index:99999;font-size:13px;font-family:monospace;';
+      div.innerHTML = '⚠️ 页面 JS 错误: ' + (e.message || 'unknown') + '<br>请按 <strong>Ctrl+Shift+R</strong> 强制刷新或 F12 查看详情';
+      document.body.appendChild(div);
+    });
+    window.addEventListener('unhandledrejection', e => {
+      try { console.error('[UNHANDLED PROMISE]', e.reason); } catch {}
+    });
+  </script>
+
+  <!-- 移动端遮罩 -->
+  <div x-show="mobileNav" x-transition.opacity class="fixed inset-0 bg-black/40 z-30 md:hidden" @click="mobileNav=false"></div>
+
+  <!-- 全局通知 -->
+  <div class="fixed top-5 right-6 space-y-2 z-[60]">
+    <template x-for="t in toasts" :key="t.id">
+      <div class="bg-white shadow-lg border border-gray-200 rounded-lg px-4 py-3 text-sm flex items-center gap-2"
+           :class="{ 'border-green-300 bg-green-50': t.type==='ok', 'border-red-300 bg-red-50': t.type==='err' }">
+        <i :class="t.type==='ok' ? 'fas fa-circle-check text-green-500' : (t.type==='err' ? 'fas fa-circle-xmark text-red-500' : 'fas fa-info-circle text-blue-500')"></i>
+        <span x-text="t.msg"></span>
+      </div>
+    </template>
+  </div>
+
+  <!-- ============ 整体布局：左侧菜单栏 + 右侧内容 ============ -->
+  <div class="flex h-screen overflow-hidden">
+
+    <!-- 左侧菜单栏（移动端为抽屉） -->
+    <aside class="w-64 md:w-60 flex-shrink-0 bg-white border-r border-[#eceef2] flex flex-col fixed md:static inset-y-0 left-0 z-40 transform transition-transform duration-200 md:transform-none"
+           :class="mobileNav ? 'translate-x-0' : '-translate-x-full md:translate-x-0'">
+      <!-- Logo -->
+      <div class="px-5 py-5 flex items-center gap-3 border-b border-[#f0f1f4]">
+        <div class="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center shadow-sm">
+          <img src="/logo.png" alt="商务通" class="w-full h-full object-cover" />
+        </div>
+        <div class="leading-tight">
+          <div class="text-[15px] font-bold text-gray-800">商务通</div>
+          <div class="nav-sub">智能调研</div>
+        </div>
+      </div>
+
+      <!-- 导航 -->
+      <nav class="flex-1 py-3 overflow-y-auto">
+        <div class="px-5 pb-2 pt-1 text-[11px] font-semibold text-gray-400 tracking-wider">工作区</div>
+        <div class="nav-item" :class="{'active': tab==='workspace'}" @click="tab='workspace'; mobileNav=false">
+          <i class="fas fa-wand-magic-sparkles"></i>
+          <div class="flex-1">智能调研</div>
+        </div>
+        <div class="px-5 pb-2 pt-4 text-[11px] font-semibold text-gray-400 tracking-wider">客户</div>
+        <div class="nav-item" :class="{'active': tab==='customers'}" @click="tab='customers'; loadAll(); mobileNav=false">
+          <i class="fas fa-users"></i>
+          <div class="flex-1">客户看板</div>
+          <span class="tag tag-gray !px-1.5 !py-0 text-[10px]" x-show="stats.total" x-text="stats.total"></span>
+        </div>
+        <div class="px-5 pb-2 pt-4 text-[11px] font-semibold text-gray-400 tracking-wider">系统</div>
+        <div class="nav-item" :class="{'active': tab==='fields'}" @click="tab='fields'; loadFieldDefs(); mobileNav=false">
+          <i class="fas fa-list-check"></i>
+          <div class="flex-1">字段管理</div>
+          <span class="tag tag-gray !px-1.5 !py-0 text-[10px]" x-show="fieldDefs.length" x-text="fieldDefs.length"></span>
+        </div>
+        <div class="nav-item" :class="{'active': tab==='models'}" @click="tab='models'; loadModels(); mobileNav=false">
+          <i class="fas fa-microchip"></i>
+          <div class="flex-1">模型管理</div>
+          <span class="tag tag-gray !px-1.5 !py-0 text-[10px]" x-show="models.length" x-text="models.length"></span>
+        </div>
+      </nav>
+
+      <!-- 底部状态 -->
+      <div class="px-4 py-3 border-t border-[#f0f1f4] space-y-2">
+        <div class="flex items-center gap-2 text-[11px] text-gray-500">
+          <span class="w-1.5 h-1.5 rounded-full" :class="health.search?.enabled ? 'bg-green-500' : 'bg-amber-500'"></span>
+          <span x-text="health.search?.enabled ? '搜索·'+(health.search.provider||'') : '搜索未启用'"></span>
+          <span class="text-gray-300">|</span>
+          <span class="truncate" x-text="health.model || ''"></span>
+        </div>
+        <div class="flex items-center justify-between gap-2 text-[11px] text-gray-400">
+          <div class="flex items-center gap-2 min-w-0">
+            <i class="fas fa-user-circle"></i>
+            <span class="truncate" x-text="me?.name || '调研分析师'"></span>
+          </div>
+          <button @click="logout()"
+                  class="text-gray-400 hover:text-red-500 transition-colors flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-red-50"
+                  title="退出登录">
+            <i class="fas fa-right-from-bracket"></i>
+            <span>退出</span>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- 右侧内容区 -->
+    <div class="flex-1 flex flex-col min-w-0">
+      <!-- 顶部细条 -->
+      <header class="h-14 flex-shrink-0 bg-white border-b border-[#eceef2] px-4 md:px-7 flex items-center justify-between gap-3">
+        <div class="flex items-center gap-3 min-w-0">
+          <button class="md:hidden text-gray-600 hover:text-gray-900 -ml-1 p-1" @click="mobileNav=true" aria-label="打开菜单">
+            <i class="fas fa-bars text-lg"></i>
+          </button>
+          <h1 class="page-title truncate" x-text="tab==='workspace' ? '智能调研工作台' : (tab==='customers' ? '客户与看板' : (tab==='fields' ? '查询字段管理' : (tab==='models' ? '模型管理' : '')))"></h1>
+        </div>
+        <div class="flex items-center gap-3 flex-shrink-0">
+          <span class="tag" :class="health.search?.enabled ? 'tag-green' : 'tag-amber'" x-show="health.model">
+            <i class="fas md:mr-1" :class="health.search?.enabled ? 'fa-globe' : 'fa-circle-exclamation'"></i>
+            <span class="hidden md:inline" x-text="health.search?.enabled ? '搜索已启用 ('+(health.search.provider||'')+')' : '搜索未启用'"></span>
+          </span>
+          <div class="hidden sm:flex items-center gap-2 text-xs text-gray-500 px-2 py-1 rounded-md bg-gray-50 border border-gray-100">
+            <i class="fas fa-user-circle text-gray-400"></i>
+            <span x-text="me?.name || 'admin'"></span>
+          </div>
+          <button @click="logout()"
+                  class="flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:text-red-600 hover:border-red-200 hover:bg-red-50 transition-colors"
+                  title="退出登录">
+            <i class="fas fa-right-from-bracket"></i>
+            <span>退出</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- 滚动主区 -->
+      <main class="flex-1 overflow-y-auto p-4 md:p-7">
+       <div class="w-full">
+
+    <!-- ============ Tab 1: 调研工作台 ============ -->
+    <section x-show="tab==='workspace'" class="space-y-4">
+
+      <div class="card p-4 md:p-5">
+        <!-- Tab 标签：标题 + 换行 + tab按钮 -->
+        <h2 class="text-base font-semibold text-gray-700 mb-3">1. 录入方式</h2>
+        <div class="flex items-center gap-2 mb-4 border-b border-gray-100">
+          <button class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
+                  :class="inputMode==='name' ? 'text-[#165DFF] border-[#165DFF]' : 'text-gray-500 border-transparent hover:text-gray-700'"
+                  @click="inputMode='name'">
+            <i class="fas fa-pen-to-square mr-1.5"></i>单个调研
+          </button>
+          <button class="px-4 py-2 text-sm font-medium transition border-b-2 -mb-px"
+                  :class="inputMode==='file' ? 'text-[#165DFF] border-[#165DFF]' : 'text-gray-500 border-transparent hover:text-gray-700'"
+                  @click="inputMode='file'">
+            <i class="fas fa-file-excel mr-1.5"></i>批量调研
+          </button>
+        </div>
+
+        <!-- 切换内容在下方 -->
+        <!-- 模式 A: 批量调研 - 上传 xlsx -->
+        <div x-show="inputMode==='file'">
+          <div class="flex items-center justify-between mb-2">
+            <div class="text-xs text-gray-500">按当前启用字段下载模板，填好客户清单后上传，批量调研。</div>
+            <a href="/api/template.xlsx" class="text-[#165DFF] hover:underline text-sm font-medium flex items-center gap-1 whitespace-nowrap">
+              <i class="fas fa-download"></i>下载模板
+            </a>
+          </div>
+          <label class="border-2 border-dashed border-gray-300 rounded-lg px-4 py-8 text-center hover:border-[#165DFF] transition-colors cursor-pointer block">
+            <i class="fas fa-cloud-arrow-up text-4xl text-[#165DFF]"></i>
+            <div class="mt-3 text-sm text-gray-600">点击或拖拽上传 <span class="font-medium">客户信息表（.xlsx）</span></div>
+            <div class="text-xs text-gray-400 mt-1.5">表头需与下载模板一致，自动识别全部字段</div>
+            <input type="file" accept=".xlsx" class="hidden" @change="upload($event)">
+          </label>
+          <div x-show="parseRes" class="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+            <div class="text-green-700 text-sm font-semibold flex items-center gap-1"><i class="fas fa-circle-check"></i> 文件已解析</div>
+            <div class="text-xs text-gray-700 mt-1.5">共识别 <b x-text="parseRes?.customer_count"></b> 条客户记录，<b x-text="parseRes?.field_count"></b> 个字段。</div>
+            <div class="text-[11px] text-gray-400 mt-1">已知字段将作为基准上下文</div>
+          </div>
+        </div>
+
+        <!-- 模式 B: 单个调研（公司名称 / APP 名称 至少填一个；展业区域不能单独查询） -->
+        <div x-show="inputMode==='name'" class="space-y-3">
+          <div class="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <i class="fas fa-circle-info mr-1"></i> <b>公司名称 / APP 名称至少填一个</b>（展业区域无法定位到具体客户，不能单独作为查询条件）。多填能让模型搜索更精准（如：APP「TruCred」+ 区域「墨西哥」可定位到具体公司）。
+          </div>
+          <div>
+            <label class="text-xs text-gray-500">公司名称</label>
+            <div class="relative mt-1">
+              <i class="fas fa-building absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+              <input type="text" x-model="companyName" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')"
+                     placeholder="如:杭州某某金融服务有限公司（可选，能填则填）"
+                     class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+            </div>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs text-gray-500">APP 名称</label>
+              <div class="relative mt-1">
+                <i class="fas fa-mobile-screen absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                <input type="text" x-model="appName" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')"
+                       placeholder="如:TruCred / 拍拍贷"
+                       class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+              </div>
+            </div>
+            <div>
+              <label class="text-xs text-gray-500">展业区域</label>
+              <div class="relative mt-1">
+                <i class="fas fa-location-dot absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+                <input type="text" x-model="region" autocomplete="off" readonly onfocus="this.removeAttribute('readonly')"
+                       placeholder="如:墨西哥 / 中国 / 印尼"
+                       class="w-full pl-9 pr-3 py-2.5 text-sm border border-gray-300 rounded-lg focus:border-[#165DFF] focus:ring-2 focus:ring-[#165DFF]/15 outline-none transition">
+              </div>
+            </div>
+          </div>
+          <div class="text-[11px] text-gray-500">系统将以填写的内容作为基准上下文,按下方所选<b>模型</b>与<b>字段范围</b>联网调研补全(含来源标注)。</div>
+        </div>
+      </div>
+
+      <div class="card p-4 md:p-5">
+        <h2 class="text-base font-semibold mb-3"><i class="fas fa-microchip text-[#165DFF] mr-1"></i>2. 选择调研模型（可多选）</h2>
+        <div class="text-xs text-gray-500 mb-2">同一字段多个模型并发调研，自动合并一致结果或标注冲突</div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mb-3">
+          <template x-for="m in availableModels" :key="m.id">
+            <label class="flex items-center gap-2 px-3 py-2 border rounded cursor-pointer hover:bg-blue-50 transition"
+                   :class="selectedModels.includes(m.id) ? 'bg-blue-50 border-[#165DFF]' : 'bg-white border-gray-200'">
+              <input type="checkbox" :value="m.id" x-model="selectedModels" class="rounded text-[#165DFF]">
+              <div class="flex-1">
+                <div class="text-sm font-medium" x-text="m.name"></div>
+                <div class="text-xs text-gray-400" x-text="m.identifier"></div>
+              </div>
+            </label>
+          </template>
+          <div x-show="!availableModels.length" class="col-span-2 text-sm text-gray-400 py-4 text-center">
+            无可用模型。请到「模型管理」添加配置。
+          </div>
+        </div>
+        <div class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+          <i class="fas fa-circle-info mr-1"></i> 系统会基于已知字段做<strong>一致性校验</strong>，对空字段做<strong>主动调研补全</strong>，并强制要求模型给出可追溯的来源 URL。
+        </div>
+      </div>
+
+      <div class="card p-4 md:p-5">
+        <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+          <h2 class="text-base font-semibold"><i class="fas fa-list-check text-[#165DFF] mr-1"></i>3. 选择字段范围（可选，留空 = 全部）</h2>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-gray-400">已选 <b class="text-[#165DFF]" x-text="selectedFields.length"></b> 项</span>
+            <button class="text-xs text-[#165DFF] hover:underline" @click="selectedFields=[]">清空</button>
+            <button class="text-xs text-[#165DFF] hover:underline" @click="selectAllFields()">全选</button>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <template x-for="[group, items] in groupedSelectFields" :key="group">
+            <div class="border border-gray-100 rounded-lg overflow-hidden">
+              <!-- 分组头：折叠 + 组内全选 + 计数 -->
+              <div class="flex items-center justify-between px-3 py-2 bg-gray-50 cursor-pointer select-none"
+                   @click="fieldGroupCollapsed[group] = !fieldGroupCollapsed[group]">
+                <div class="flex items-center gap-2 text-sm font-medium text-gray-700">
+                  <i class="fas text-gray-400 text-xs transition-transform" :class="fieldGroupCollapsed[group] ? 'fa-chevron-right' : 'fa-chevron-down'"></i>
+                  <span x-text="groupLabels[group] || group"></span>
+                  <span class="tag tag-gray !px-1.5 !py-0 text-[10px]" x-text="groupSelectedCount(items) + '/' + groupSelectableCount(items)"></span>
+                </div>
+                <button class="text-xs text-[#165DFF] hover:underline" @click.stop="toggleGroup(items)"
+                        x-text="isGroupAllSelected(items) ? '取消本组' : '全选本组'"></button>
+              </div>
+              <!-- 分组内字段：chip 风格 -->
+              <div x-show="!fieldGroupCollapsed[group]" class="p-3 flex flex-wrap gap-2">
+                <template x-for="f in items" :key="f.key">
+                  <button type="button"
+                          @click="!disabledFields.includes(f.key) && toggleField(f.key)"
+                          :disabled="disabledFields.includes(f.key)"
+                          class="px-3 py-1.5 rounded-full text-xs border transition-colors flex items-center gap-1.5"
+                          :class="disabledFields.includes(f.key)
+                            ? 'opacity-40 cursor-not-allowed border-gray-200 text-gray-400'
+                            : (selectedFields.includes(f.key)
+                                ? 'bg-blue-50 border-[#165DFF] text-[#165DFF] font-medium'
+                                : 'border-gray-200 text-gray-600 hover:border-[#165DFF] hover:text-[#165DFF]')">
+                    <i class="fas text-[10px]" :class="selectedFields.includes(f.key) ? 'fa-circle-check' : 'fa-circle'"></i>
+                    <span x-text="f.label"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- 自定义字段：直接走「字段管理」新增弹窗，保存后落库并自动选中 -->
+        <div class="mt-4 pt-4 border-t border-gray-100">
+          <div class="flex items-center justify-between">
+            <h3 class="text-sm font-semibold text-gray-700"><i class="fas fa-plus-circle text-amber-500 mr-1"></i>自定义字段</h3>
+            <button @click="openFieldNew(true)" class="text-xs text-[#165DFF] hover:underline"><i class="fas fa-plus mr-1"></i>添加字段</button>
+          </div>
+          <div class="text-[11px] text-gray-400 py-1.5">点击「添加字段」可新增一个调研字段，保存后会加入字段管理，并自动出现在上方对应分组、默认选中。</div>
+        </div>
+      </div>
+
+      <div class="card p-4 md:p-5">
+        <h2 class="text-base font-semibold mb-3"><i class="fas fa-play text-[#165DFF] mr-1"></i>4. 执行调研</h2>
+        <div class="flex items-center gap-3 flex-wrap">
+          <button @click="runResearch()" :disabled="!canResearch || job?.status==='running'"
+                  class="w-full md:w-auto justify-center bg-[#165DFF] hover:bg-blue-600 disabled:bg-gray-300 text-white px-5 py-2.5 rounded-lg text-sm font-medium flex items-center gap-2 transition">
+            <i class="fas" :class="job?.status==='running' ? 'fa-spinner fa-spin' : 'fa-play'"></i>
+            <span x-text="job?.status==='running' ? '调研中...' : '执行调研任务'"></span>
+          </button>
+          <span class="text-xs text-gray-500" x-show="canResearch && job?.status!=='running'">
+            将对 <b x-text="researchTargetDesc"></b>、<b x-text="totalFieldCount"></b> 个字段发起调研<span x-show="customFieldCount" class="text-amber-600">（含 <span x-text="customFieldCount"></span> 个自定义）</span>
+          </span>
+        </div>
+        <div class="text-xs text-red-500 mt-2" x-show="researchError" x-text="researchError"></div>
+
+        <!-- 进度 + 每步进展 -->
+        <div class="mt-4" x-show="job">
+          <div class="flex items-center justify-between text-xs text-gray-500 mb-1">
+            <span>任务 <code class="text-gray-600" x-text="job?.id"></code> ·
+              <span class="tag" :class="{'tag-blue':job?.status==='running','tag-green':job?.status==='done','tag-red':job?.status==='failed'}" x-text="jobStatusText"></span>
+            </span>
+            <span x-show="job?.progress" x-text="`${job?.progress?.done||0} / ${job?.progress?.total||0}`"></span>
+          </div>
+          <div class="progress-track"><div class="progress-bar" :style="`width: ${job && job.progress?.total ? Math.round(job.progress.done/job.progress.total*100) : 0}%`"></div></div>
+
+          <!-- 每步进展（替代弹窗提示）-->
+          <div x-show="job?.steps?.length" class="mt-3 border border-gray-100 rounded-lg bg-gray-50/70 max-h-60 overflow-y-auto divide-y divide-gray-100" x-ref="stepBox">
+            <template x-for="(s,i) in (job?.steps||[])" :key="i">
+              <div class="flex items-center gap-2 px-3 py-1.5 text-xs">
+                <i class="fas w-3.5 text-center flex-shrink-0" :class="stepIcon(s.status)"></i>
+                <span class="text-gray-700 flex-shrink-0" x-text="s.label"></span>
+                <span class="text-gray-400 truncate" :title="s.value || stepStatusZh(s.status)" x-text="s.value ? '→ '+s.value : stepStatusZh(s.status)"></span>
+              </div>
+            </template>
+          </div>
+
+          <div class="flex items-center justify-between mt-2 gap-3">
+            <span class="text-xs text-red-500" x-show="job?.error" x-text="job?.error"></span>
+            <template x-if="job?.status==='done'">
+              <button @click="lastReportCustomerId ? openReport(lastReportCustomerId) : (tab='customers', loadAll())"
+                      class="ml-auto text-xs text-[#165DFF] hover:underline flex items-center gap-1">
+                <i class="fas fa-file-lines"></i><span x-text="lastReportCustomerId ? '查看报告' : '去客户看板'"></span>
+              </button>
+            </template>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ Tab 2: 客户列表 / 看板 ============ -->
+    <section x-show="tab==='customers'" class="space-y-4">
+      <!-- 看板 -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">客户总数</div>
+          <div class="text-2xl font-bold mt-1" x-text="stats.total||0"></div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">按客户等级</div>
+          <div class="mt-1.5 space-y-1 text-xs">
+            <template x-for="[k,v] in Object.entries(stats.byLevel||{})" :key="k">
+              <div class="flex justify-between"><span x-text="k"></span><span class="font-semibold" x-text="v"></span></div>
+            </template>
+          </div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">按展业区域</div>
+          <div class="mt-1.5 flex flex-wrap gap-1">
+            <template x-for="[k,v] in Object.entries(stats.byRegion||{})" :key="k">
+              <span class="tag tag-gray" x-text="`${k} ${v}`"></span>
+            </template>
+          </div>
+        </div>
+        <div class="card p-4">
+          <div class="text-xs text-gray-500">按业务线 / 产品</div>
+          <div class="mt-1.5 space-y-1 text-xs">
+            <template x-for="[k,v] in Object.entries(stats.byBizLine||{})" :key="k">
+              <div class="flex justify-between"><span x-text="k"></span><span class="font-semibold" x-text="v"></span></div>
+            </template>
+          </div>
+        </div>
+      </div>
+
+      <!-- 搜索 -->
+      <div class="card p-3">
+        <div class="flex items-center gap-2 md:gap-3 flex-wrap">
+          <div class="relative w-full md:w-80">
+            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm"></i>
+            <input type="text" x-model="kw" @input.debounce.400ms="loadCustomers()" placeholder="按关键词检索（客户名/区域/APP...）"
+                   class="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-100 focus:border-[#165DFF]">
+          </div>
+          <select x-model="filterLevel" @change="loadCustomers()" class="flex-1 md:flex-none border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">全部等级</option>
+            <template x-for="k in Object.keys(stats.byLevel||{})" :key="k"><option x-text="k"></option></template>
+          </select>
+          <select x-model="filterRegion" @change="loadCustomers()" class="flex-1 md:flex-none border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <option value="">全部区域</option>
+            <template x-for="k in Object.keys(stats.byRegion||{})" :key="k"><option x-text="k"></option></template>
+          </select>
+          <button class="text-sm text-gray-500 hover:text-gray-700 md:ml-auto px-2 py-1" @click="loadAll()"><i class="fas fa-rotate mr-1"></i>刷新</button>
+        </div>
+      </div>
+
+      <!-- 批量导出 -->
+      <div class="card p-3" x-show="customers.length">
+        <div class="flex items-center justify-between gap-3 flex-wrap">
+          <div class="flex items-center gap-2 text-sm text-gray-600">
+            <label class="flex items-center gap-1.5 cursor-pointer hover:text-gray-800">
+              <input type="checkbox" :checked="selectedIds.length === customers.length && customers.length > 0"
+                     @change="$event.target.checked ? selectAll() : clearSelection()"
+                     class="rounded border-gray-300 text-[#165DFF] focus:ring-[#165DFF]/30">
+              <span>全选</span>
+            </label>
+            <span x-show="selectedIds.length" class="text-[#165DFF] font-medium">已选 <span x-text="selectedIds.length"></span> 个客户</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="clearSelection()" x-show="selectedIds.length" class="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5">
+              <i class="fas fa-xmark mr-1"></i>取消选择
+            </button>
+            <a :href="selectedIds.length ? `/api/export/v2.xlsx?ids=${selectedIds.join(',')}` : '/api/export/v2.xlsx'"
+               target="_blank"
+               class="inline-flex items-center gap-2 bg-[#165DFF] hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
+              <i class="fas fa-download"></i>
+              <span x-text="selectedIds.length ? '导出选中' : '导出全部'"></span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- 客户表 -->
+      <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm responsive-table">
+            <thead>
+              <tr class="bg-gray-50 text-left text-xs text-gray-600">
+                <th class="px-3 py-3 w-10 text-center">
+                  <input type="checkbox" :checked="selectedIds.length === customers.length && customers.length > 0"
+                         @change="$event.target.checked ? selectAll() : clearSelection()"
+                         class="rounded border-gray-300 text-[#165DFF] focus:ring-[#165DFF]/30">
+                </th>
+                <th class="px-4 py-3">客户名称</th>
+                <th class="px-4 py-3">APP</th>
+                <th class="px-4 py-3">展业区域</th>
+                <th class="px-4 py-3">等级</th>
+                <th class="px-4 py-3">业务线</th>
+                <th class="px-4 py-3">产品</th>
+                <th class="px-4 py-3">调研完整度</th>
+                <th class="px-4 py-3">状态</th>
+                <th class="px-4 py-3 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <template x-for="c in customers" :key="c.id">
+                <tr class="hover:bg-blue-50/30 cursor-pointer" :class="selectedIds.includes(c.id) ? 'bg-blue-50/40' : ''" @click="openReport(c.id)">
+                  <td class="px-3 py-3 text-center" @click.stop>
+                    <input type="checkbox" :value="c.id" x-model="selectedIds"
+                           class="rounded border-gray-300 text-[#165DFF] focus:ring-[#165DFF]/30">
+                  </td>
+                  <td class="px-4 py-3 cell-main" data-label="客户名称"><div class="font-medium" x-text="c.customer_name"></div></td>
+                  <td class="px-4 py-3" data-label="APP" x-text="c.raw_known?.app_name || '—'"></td>
+                  <td class="px-4 py-3" data-label="区域" x-text="c.region || '—'"></td>
+                  <td class="px-4 py-3" data-label="等级"><span class="tag tag-blue" x-text="c.customer_level || '—'"></span></td>
+                  <td class="px-4 py-3" data-label="业务线" x-text="c.business_line || '—'"></td>
+                  <td class="px-4 py-3" data-label="产品" x-text="c.product_type || '—'"></td>
+                  <td class="px-4 py-3" data-label="完整度">
+                    <div class="flex items-center gap-2">
+                      <div class="progress-track w-24"><div class="progress-bar" :style="`width:${c._stat?.completeness||0}%`"></div></div>
+                      <span class="text-[11px] text-gray-400" x-text="(c._stat?.completeness||0)+'%'"></span>
+                    </div>
+                  </td>
+                  <td class="px-4 py-3" data-label="状态">
+                    <template x-if="c._stat?.nConflict > 0"><span class="tag tag-red"><i class="fas fa-triangle-exclamation mr-1"></i>有冲突 <span x-text="c._stat.nConflict"></span></span></template>
+                    <template x-if="!c._stat?.nConflict && c._stat?.nFilled > 0"><span class="tag tag-green"><i class="fas fa-check mr-1"></i>已补充</span></template>
+                    <template x-if="!c._stat?.nFilled && !c._stat?.nConflict"><span class="tag tag-amber"><i class="fas fa-spinner mr-1"></i>待调研</span></template>
+                  </td>
+                  <td class="px-4 py-3 text-center cell-action whitespace-nowrap">
+                    <button class="text-[#165DFF] hover:underline text-sm font-medium mr-3" @click.stop="openReport(c.id)" title="查看报告"><i class="fas fa-file-lines mr-1"></i>查看</button>
+                    <button class="text-red-500 hover:underline text-sm font-medium mr-3" @click.stop="delCustomer(c)" title="删除该客户及其调研数据"><i class="fas fa-trash mr-1"></i>删除</button>
+                    <a class="text-[#165DFF] hover:underline text-sm font-medium" :href="`/api/customers/${c.id}/export.xlsx`" target="_blank" @click.stop title="导出该客户的调研报告 Excel"><i class="fas fa-download mr-1"></i>导出</a>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="customers.length===0"><td colspan="10" class="text-center text-gray-400 py-8">暂无客户，请先到「智能调研」上传 V1.xlsx 或键入公司名称</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 模型管理 section ============ -->
+    <section x-show="tab==='models'" class="space-y-4">
+      <div class="flex items-center justify-between mb-4">
+        <p class="text-sm text-gray-500">配置多个 LLM，启用后可在工作台并行调研</p>
+        <button @click="openModelNew()" class="bg-[#165DFF] hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+          <i class="fas fa-plus"></i>新增模型
+        </button>
+      </div>
+
+      <div class="card overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 text-xs text-gray-600">
+              <tr>
+                <th class="px-4 py-3 text-left">模型名称</th>
+                <th class="px-4 py-3 text-left">提供商</th>
+                <th class="px-4 py-3 text-left">标识符</th>
+                <th class="px-4 py-3 text-left">API 端点</th>
+                <th class="px-4 py-3 text-center">状态</th>
+                <th class="px-4 py-3 text-left">最后测试</th>
+                <th class="px-4 py-3 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <template x-for="m in models" :key="m.id">
+                <tr class="hover:bg-blue-50/30">
+                  <td class="px-4 py-3">
+                    <div class="font-medium" x-text="m.name"></div>
+                    <div class="text-xs text-gray-400" x-text="m.id"></div>
+                  </td>
+                  <td class="px-4 py-3"><span class="tag tag-blue" x-text="m.provider"></span></td>
+                  <td class="px-4 py-3 font-mono text-xs text-gray-600" x-text="m.identifier"></td>
+                  <td class="px-4 py-3 text-xs text-gray-600 truncate max-w-xs" :title="m.api_url" x-text="m.api_url"></td>
+                  <td class="px-4 py-3 text-center">
+                    <button @click="toggleModel(m)" class="text-xs"
+                            :class="m.enabled ? 'tag tag-green' : 'tag tag-gray'">
+                      <i class="fas mr-1" :class="m.enabled ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                      <span x-text="m.enabled ? '启用' : '禁用'"></span>
+                    </button>
+                  </td>
+                  <td class="px-4 py-3 text-xs">
+                    <template x-if="m.last_test_at">
+                      <div>
+                        <span class="tag" :class="m.last_test_ok ? 'tag-green' : 'tag-red'" x-text="m.last_test_ok ? '通过' : '失败'"></span>
+                        <div class="text-gray-400 mt-0.5" x-text="new Date(m.last_test_at).toLocaleString('zh-CN')"></div>
+                        <template x-if="!m.last_test_ok && m.last_test_error">
+                          <div class="text-red-500 mt-0.5" x-text="m.last_test_error.slice(0,60)"></div>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="!m.last_test_at"><span class="text-gray-400">未测试</span></template>
+                  </td>
+                  <td class="px-4 py-3 text-center whitespace-nowrap">
+                    <button type="button" @click.stop.prevent="testModel(m)" class="text-[#165DFF] hover:underline text-xs mr-2">
+                      <i class="fas mr-1" :class="(modelTesting && modelTesting[m.id]) ? 'fa-spinner fa-spin' : 'fa-bolt'"></i>测试
+                    </button>
+                    <template x-if="modelTestResult[m.id]">
+                      <span class="text-[11px] mr-2"
+                            :class="modelTestResult[m.id].state==='ok' ? 'text-green-600' : (modelTestResult[m.id].state==='err' ? 'text-red-500' : 'text-gray-400')"
+                            x-text="modelTestResult[m.id].text"></span>
+                    </template>
+                    <button type="button" @click.stop.prevent="openModelEdit(m)" class="text-gray-600 hover:underline text-xs mr-2"><i class="fas fa-pen mr-1"></i>编辑</button>
+                    <button type="button" @click.stop.prevent="delModel(m)" class="text-red-500 hover:underline text-xs"><i class="fas fa-trash mr-1"></i>删除</button>
+                  </td>
+                </tr>
+              </template>
+              <tr x-show="!models.length">
+                <td colspan="7" class="text-center text-gray-400 py-12">
+                  暂无模型。<button @click="openModelNew()" class="text-[#165DFF] hover:underline">立即添加</button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 字段管理 ============ -->
+    <section x-show="tab==='fields'" class="space-y-4">
+      <div class="flex items-center justify-between mb-4 gap-2 flex-wrap">
+        <p class="text-sm text-gray-500">维护调研字段的中文名、字段解释与来源说明——解释会随调研一起喂给大模型，提升命中率。停用的字段不参与调研与导出。</p>
+        <div class="flex items-center gap-2">
+          <a href="/api/field-defs/export.xlsx" class="px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:border-[#165DFF] hover:text-[#165DFF] flex items-center gap-1.5">
+            <i class="fas fa-file-export"></i>批量导出
+          </a>
+          <label class="px-3 py-2 rounded-lg text-sm font-medium border border-gray-200 text-gray-700 hover:border-[#165DFF] hover:text-[#165DFF] flex items-center gap-1.5 cursor-pointer">
+            <i class="fas" :class="fieldImporting ? 'fa-spinner fa-spin' : 'fa-file-import'"></i>批量导入
+            <input type="file" accept=".xlsx" class="hidden" @change="importFieldDefs($event)">
+          </label>
+          <button @click="openFieldNew()" class="bg-[#165DFF] hover:bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2">
+            <i class="fas fa-plus"></i>新增字段
+          </button>
+        </div>
+      </div>
+
+      <div class="space-y-3">
+        <template x-for="[group, items] in groupedFieldDefs" :key="group">
+          <div class="card overflow-hidden">
+            <!-- 分组标题栏：醒目色条 + 名称 + 计数 + 折叠 -->
+            <div class="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-blue-50 to-transparent border-b border-gray-100 cursor-pointer select-none"
+                 @click="fieldMgmtCollapsed[group] = !fieldMgmtCollapsed[group]">
+              <div class="flex items-center gap-2.5">
+                <i class="fas text-gray-400 text-xs transition-transform" :class="fieldMgmtCollapsed[group] ? 'fa-chevron-right' : 'fa-chevron-down'"></i>
+                <span class="w-1.5 h-5 rounded bg-[#165DFF]"></span>
+                <span class="font-semibold text-gray-800" x-text="groupLabels[group] || group"></span>
+                <span class="tag tag-blue !px-2 text-[11px]" x-text="items.length + ' 个字段'"></span>
+                <span class="text-[11px] text-gray-400" x-text="'启用 ' + items.filter(f=>f.enabled!==false).length"></span>
+              </div>
+            </div>
+            <!-- 分组内字段表 -->
+            <div class="overflow-x-auto" x-show="!fieldMgmtCollapsed[group]">
+              <table class="w-full text-sm">
+                <thead class="bg-gray-50/60 text-xs text-gray-500">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-medium">中文名称</th>
+                    <th class="px-4 py-2 text-left font-medium">字段解释</th>
+                    <th class="px-4 py-2 text-left font-medium">来源说明</th>
+                    <th class="px-4 py-2 text-center font-medium">状态</th>
+                    <th class="px-4 py-2 text-center font-medium">操作</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                  <template x-for="f in items" :key="f.key">
+                    <tr class="hover:bg-blue-50/30">
+                      <td class="px-4 py-3">
+                        <div class="font-medium" x-text="f.label"></div>
+                      </td>
+                      <td class="px-4 py-3 text-xs text-gray-600 max-w-xs"><div class="line-clamp-2" x-text="f.hint || '—'"></div></td>
+                      <td class="px-4 py-3 text-xs text-gray-600 max-w-xs">
+                        <div class="line-clamp-2" x-text="f.source_note || '—'"></div>
+                        <div x-show="(f.reference_urls || []).length" class="mt-1 flex flex-wrap gap-1">
+                          <template x-for="r in (f.reference_urls || [])" :key="r.url || r.name">
+                            <a :href="r.url" target="_blank" rel="noopener"
+                               class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-[#165DFF] hover:bg-blue-100"
+                               :title="r.url">
+                              <i class="fas fa-link text-[9px]"></i>
+                              <span x-text="r.name || r.url"></span>
+                            </a>
+                          </template>
+                        </div>
+                      </td>
+                      <td class="px-4 py-3 text-center">
+                        <button @click="toggleFieldDef(f)" class="text-xs" :class="f.enabled!==false ? 'tag tag-green' : 'tag tag-gray'">
+                          <i class="fas mr-1" :class="f.enabled!==false ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
+                          <span x-text="f.enabled!==false ? '启用' : '停用'"></span>
+                        </button>
+                      </td>
+                      <td class="px-4 py-3 text-center whitespace-nowrap">
+                        <button type="button" @click.stop.prevent="openFieldEdit(f)" class="text-gray-600 hover:underline text-xs mr-2"><i class="fas fa-pen mr-1"></i>编辑</button>
+                        <button type="button" @click.stop.prevent="delFieldDef(f)" class="text-red-500 hover:underline text-xs"><i class="fas fa-trash mr-1"></i>删除</button>
+                      </td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </template>
+        <div x-show="!fieldDefs.length" class="card text-center text-gray-400 py-12">暂无字段</div>
+      </div>
+    </section>
+      </main>
+    </div><!-- /右侧内容区 -->
+  </div><!-- /flex 整体布局 -->
+
+  <!-- ============ 报告抽屉 ============ -->
+  <div x-show="reportOpen" x-transition.opacity class="fixed inset-0 bg-black/40 z-40" @click="reportOpen=false"></div>
+  <aside x-show="reportOpen" class="fixed top-0 right-0 h-full w-full md:w-[60%] lg:w-[55%] bg-white z-50 shadow-2xl drawer overflow-y-auto"
+         :style="reportOpen ? 'transform: translateX(0)' : 'transform: translateX(100%)'">
+    <div class="px-4 md:px-6 py-4 border-b border-gray-200 sticky top-0 bg-white z-10">
+      <div class="flex items-center justify-between">
+        <div>
+          <h3 class="text-lg font-semibold" x-text="report?.customer?.customer_name || '调查报告'"></h3>
+          <p class="text-xs text-gray-400 mt-0.5" x-text="(report?.customer?.region || '') + ' · ' + (report?.customer?.raw_known?.app_name || '')"></p>
+        </div>
+        <button class="text-gray-400 hover:text-gray-600" @click="reportOpen=false"><i class="fas fa-times text-lg"></i></button>
+      </div>
+      <!-- 操作按钮区 -->
+      <div class="flex flex-wrap items-center gap-2 mt-3">
+        <template x-if="!reportEditMode">
+          <button @click="enterReportEdit()" class="text-xs px-3 py-1.5 rounded-md border border-gray-200 text-gray-700 hover:border-[#165DFF] hover:text-[#165DFF] flex items-center gap-1">
+            <i class="fas fa-pen"></i>人工补充信息
+          </button>
+        </template>
+        <template x-if="reportEditMode">
+          <div class="flex flex-wrap items-center gap-2">
+            <button @click="saveReportManual(false)" :disabled="reportSaving" class="text-xs px-3 py-1.5 rounded-md bg-[#165DFF] text-white hover:bg-blue-600 disabled:opacity-60 flex items-center gap-1">
+              <i class="fas" :class="reportSaving ? 'fa-spinner fa-spin' : 'fa-floppy-disk'"></i>仅保存
+            </button>
+            <button @click="saveReportManual(true)" :disabled="reportSaving" class="text-xs px-3 py-1.5 rounded-md bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60 flex items-center gap-1">
+              <i class="fas" :class="reportSaving ? 'fa-spinner fa-spin' : 'fa-rotate'"></i>保存并更新
+            </button>
+            <button @click="cancelReportEdit()" class="text-xs px-3 py-1.5 rounded-md border border-gray-200 text-gray-600 hover:text-gray-800">取消</button>
+          </div>
+        </template>
+        <button @click="compareVersions()" class="text-xs px-3 py-1.5 rounded-md border border-gray-200 text-gray-700 hover:border-amber-400 hover:text-amber-600 flex items-center gap-1">
+          <i class="fas fa-code-compare"></i>版本对比
+        </button>
+        <span x-show="diffActive" class="text-[11px] text-amber-600 flex items-center gap-1">
+          <i class="fas fa-circle-dot"></i>对比上一版：<b x-text="diffCount"></b> 处变化
+          <button @click="diffActive=false; diffMap={}" class="ml-1 underline">退出</button>
+        </span>
+        <span x-show="!reportEditMode" class="text-[11px] text-gray-400 ml-auto">提示：双击任意字段值可直接编辑</span>
+      </div>
+    </div>
+
+    <div class="p-4 md:p-6 space-y-4" x-show="report">
+      <!-- 冲突总览 -->
+      <template x-if="reportConflictCount > 0">
+        <div class="text-sm bg-red-50 border border-red-200 text-red-600 rounded-lg px-3 py-2">
+          <i class="fas fa-triangle-exclamation mr-1"></i> 检测到 <b x-text="reportConflictCount"></b> 处字段冲突，已双保留并标红，请人工校验。
+        </div>
+      </template>
+
+      <!-- 字段分组展示 -->
+      <template x-for="[group, items] in groupedReport" :key="group">
+        <div class="bg-gray-50 rounded-lg p-4">
+          <h4 class="text-sm font-semibold text-gray-700 mb-3" x-text="groupLabels[group] || group"></h4>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+            <template x-for="f in items" :key="f.key">
+              <div class="rounded p-3" :class="[cellClass(f), diffMap[f.key] ? 'ring-2 ring-amber-400 bg-amber-50' : '']">
+                <div class="text-xs text-gray-500 mb-1 flex items-center justify-between">
+                  <span class="flex items-center gap-1">
+                    <span x-text="f.label"></span>
+                    <span x-show="diffMap[f.key]" class="text-[10px] text-amber-600"><i class="fas fa-arrow-trend-up mr-0.5"></i>已变化</span>
+                  </span>
+                  <button type="button" x-show="!reportEditMode"
+                          @click="reresearchField(f.key)"
+                          :disabled="reresearchingKey === f.key || (job && job.status==='running')"
+                          class="text-[10px] text-[#165DFF] hover:underline disabled:opacity-50 disabled:no-underline whitespace-nowrap"
+                          :title="'按该字段配置的数据源重新调研'">
+                    <i class="fas mr-0.5" :class="reresearchingKey === f.key ? 'fa-spinner fa-spin' : 'fa-rotate'"></i>
+                    <span x-text="reresearchingKey === f.key ? '调研中' : '重新调研'"></span>
+                  </button>
+                </div>
+                <!-- 字段含义 + 推荐数据源（看报告时直接知道数据该来自哪） -->
+                <template x-if="!reportEditMode && (f.hint || (f.reference_urls||[]).length)">
+                  <div class="text-[10px] text-gray-400 mb-1.5 space-y-0.5">
+                    <div x-show="f.hint" class="line-clamp-1" :title="f.hint"><i class="fas fa-circle-info mr-0.5"></i><span x-text="f.hint"></span></div>
+                    <div x-show="(f.reference_urls||[]).length" class="flex flex-wrap gap-1">
+                      <template x-for="r in (f.reference_urls||[])" :key="r.url || r.name">
+                        <a :href="r.url" target="_blank" rel="noopener" class="text-[#165DFF] hover:underline" :title="r.url"><span x-text="r.name || r.url"></span></a>
+                      </template>
+                    </div>
+                  </div>
+                </template>
+
+                <!-- 编辑模式：可编辑输入框 -->
+                <template x-if="reportEditMode">
+                  <input type="text" x-model="reportDraft[f.key]"
+                         class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#165DFF] focus:ring-1 focus:ring-[#165DFF]/20 outline-none"
+                         :placeholder="f.label">
+                </template>
+
+                <!-- 查看模式 -->
+                <template x-if="!reportEditMode">
+                  <div @dblclick="startEditField(f)" class="cursor-text">
+                    <template x-if="f.r?.status==='conflict'">
+                      <div class="space-y-1">
+                        <!-- 非校验态：展示各值 + 快速校验入口 -->
+                        <template x-if="resolvingKey !== f.key">
+                          <div>
+                            <template x-for="(v,i) in (f.r.values||[])" :key="i">
+                              <div class="flex items-baseline gap-2">
+                                <span class="tag tag-gray text-[10px]" x-text="i===0 ? '已知值' : '调研值'"></span>
+                                <span class="font-medium" x-text="v"></span>
+                              </div>
+                            </template>
+                            <button @click.stop="startResolve(f)"
+                                    class="mt-1.5 text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 flex items-center gap-1">
+                              <i class="fas fa-clipboard-check"></i>快速校验
+                            </button>
+                          </div>
+                        </template>
+                        <!-- 校验态：选一个调研值或自定义填写 -->
+                        <template x-if="resolvingKey === f.key">
+                          <div class="space-y-1.5 bg-white border border-amber-300 rounded p-2" @click.stop @dblclick.stop>
+                            <div class="text-[11px] text-gray-500">选择一个值，或在下方自定义填写：</div>
+                            <template x-for="(v,i) in (f.r.values||[])" :key="i">
+                              <button @click="resolveValue = v"
+                                      class="w-full text-left text-xs px-2 py-1.5 rounded border flex items-center gap-2"
+                                      :class="resolveValue === v ? 'border-[#165DFF] bg-blue-50 text-[#165DFF]' : 'border-gray-200 hover:border-[#165DFF]'">
+                                <i class="fas text-[10px]" :class="resolveValue === v ? 'fa-circle-dot' : 'fa-circle'"></i>
+                                <span class="tag tag-gray !text-[10px] !px-1" x-text="i===0 ? '已知' : '调研'"></span>
+                                <span class="font-medium flex-1" x-text="v"></span>
+                              </button>
+                            </template>
+                            <input type="text" x-model="resolveValue" placeholder="自定义填写…"
+                                   class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#165DFF] outline-none">
+                            <div class="flex items-center gap-2 pt-0.5">
+                              <button @click="saveResolve(f)" :disabled="resolveSaving"
+                                      class="text-xs px-3 py-1 rounded bg-[#165DFF] text-white hover:bg-blue-600 disabled:opacity-60 flex items-center gap-1">
+                                <i class="fas" :class="resolveSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+                              </button>
+                              <button @click="cancelResolve()" class="text-xs px-2 py-1 text-gray-500 hover:text-gray-700">取消</button>
+                            </div>
+                          </div>
+                        </template>
+                      </div>
+                    </template>
+                    <template x-if="f.r?.status!=='conflict'">
+                      <div class="font-medium" x-text="f.r?.value || '—'"></div>
+                    </template>
+                    <!-- 版本对比：展示上一版旧值 -->
+                    <template x-if="diffMap[f.key]">
+                      <div class="text-[11px] text-amber-700 mt-1 line-through opacity-70">上一版：<span x-text="diffMap[f.key].old || '（空）'"></span></div>
+                    </template>
+                  </div>
+                </template>
+
+                <div class="text-[11px] text-gray-500 mt-1" x-show="!reportEditMode" x-text="f.r?.reason || ''"></div>
+                <!-- 模型一致性 -->
+                <template x-if="!reportEditMode && f.r?.model_summary">
+                  <div class="text-[10px] text-gray-400 mt-0.5 border-t border-gray-200 pt-1"
+                       :title="'原始模型输出:\n' + (f.r?.raw_results||[]).map(rr => rr.model + ': ' + (rr.value || 'unknown')).join('\n')">
+                    <i class="fas fa-microchip mr-1"></i><span x-text="f.r.model_summary"></span>
+                  </div>
+                </template>
+                <template x-if="!reportEditMode && f.r?.sources?.length">
+                  <div class="mt-1 space-y-1">
+                    <template x-for="s in f.r.sources" :key="s.url">
+                      <a class="src-tag" :href="s.url" target="_blank">
+                        <i class="fas fa-link mr-1"></i><span x-text="s.title || s.url"></span>
+                      </a>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </div>
+  </aside>
+
+  <!-- ============ 模型新增/编辑模态 ============ -->
+  <div x-show="modelModalOpen" x-transition.opacity class="fixed inset-0 bg-black/40 z-40 flex items-start justify-center pt-12 pb-12 overflow-y-auto" @click.self="modelModalOpen=false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4">
+      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h3 class="text-lg font-semibold" x-text="editingModelId ? '编辑模型' : '新增模型'"></h3>
+        <button @click="modelModalOpen=false" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-lg"></i></button>
+      </div>
+      <div class="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+        <div class="grid grid-cols-2 gap-4">
+          <div><label class="text-xs text-gray-500">名称<span class="text-red-500">*</span></label>
+            <input type="text" x-model="modelForm.name" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如:Claude Opus 4.8"></div>
+          <div><label class="text-xs text-gray-500">提供商<span class="text-red-500">*</span></label>
+            <select x-model="modelForm.provider" class="mt-1 w-full border rounded px-3 py-2 text-sm">
+              <option value="anthropic">anthropic (Claude 系列)</option>
+              <option value="openai">openai (GPT/DeepSeek/Qwen 兼容)</option>
+              <option value="custom">custom (自定义 OpenAI 兼容)</option>
+            </select></div>
+          <div><label class="text-xs text-gray-500">模型标识符<span class="text-red-500">*</span></label>
+            <input type="text" x-model="modelForm.identifier" class="mt-1 w-full border rounded px-3 py-2 text-sm font-mono" placeholder="如:claude-opus-4-8"></div>
+          <div><label class="text-xs text-gray-500">版本</label>
+            <input type="text" x-model="modelForm.version" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="可选"></div>
+        </div>
+        <div><label class="text-xs text-gray-500">描述</label>
+          <input type="text" x-model="modelForm.description" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="可选"></div>
+
+        <div class="border-t pt-4 mt-2">
+          <h4 class="text-sm font-semibold mb-3">API 连接</h4>
+          <div><label class="text-xs text-gray-500">API 端点 URL<span class="text-red-500">*</span></label>
+            <input type="text" x-model="modelForm.api_url" class="mt-1 w-full border rounded px-3 py-2 text-sm font-mono" placeholder="如:https://api.openai.com/v1/chat/completions"></div>
+          <div class="grid grid-cols-2 gap-4 mt-3">
+            <div><label class="text-xs text-gray-500">认证方式</label>
+              <select x-model="modelForm.auth_type" class="mt-1 w-full border rounded px-3 py-2 text-sm">
+                <option value="bearer">Bearer Token</option>
+                <option value="api_key_header">x-api-key Header</option>
+                <option value="custom_header">自定义 Headers (在下方填)</option>
+                <option value="none">无认证</option>
+              </select></div>
+            <div><label class="text-xs text-gray-500">API Key / Token<span x-show="!editingModelId" class="text-red-500">*</span>
+              <span class="text-gray-400 text-[10px]" x-show="editingModelId">已脱敏展示，不修改即保持原值</span></label>
+              <div class="relative mt-1">
+                <input :type="(editingModelId && modelForm.api_key === modelForm._api_key_mask) ? 'text' : (showKey ? 'text' : 'password')" x-model="modelForm.api_key"
+                       class="w-full pr-16 border rounded px-3 py-2 text-sm font-mono"
+                       :placeholder="editingModelId ? '保持原值（留空不修改）' : '粘贴 API Key'"
+                       autocomplete="off" spellcheck="false"
+                       @focus="if(editingModelId && modelForm.api_key === modelForm._api_key_mask){ modelForm.api_key=''; }">
+                <button type="button" @click="showKey=!showKey"
+                        class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-[#165DFF] px-1.5 py-0.5">
+                  <i class="fas" :class="showKey ? 'fa-eye-slash' : 'fa-eye'"></i>
+                  <span class="ml-1" x-text="showKey ? '隐藏' : '显示'"></span>
+                </button>
+              </div>
+            </div>
+          </div>
+          <div class="mt-3"><label class="text-xs text-gray-500">自定义 Headers (JSON,可选)</label>
+            <textarea x-model="modelForm.custom_headers_text" rows="3" class="mt-1 w-full border rounded px-3 py-2 text-xs font-mono" placeholder='{"anthropic-version":"2023-06-01"}'></textarea>
+            <div class="text-[10px] text-red-500 mt-0.5" x-show="modelForm.custom_headers_error" x-text="modelForm.custom_headers_error"></div></div>
+        </div>
+
+        <div class="border-t pt-4 mt-2 grid grid-cols-3 gap-4">
+          <div><label class="text-xs text-gray-500">超时(秒)</label>
+            <input type="number" x-model.number="modelForm.timeout" class="mt-1 w-full border rounded px-3 py-2 text-sm" min="10" max="600"></div>
+          <div><label class="text-xs text-gray-500">重试次数</label>
+            <input type="number" x-model.number="modelForm.max_retries" class="mt-1 w-full border rounded px-3 py-2 text-sm" min="0" max="10"></div>
+          <div><label class="text-xs text-gray-500">并发数</label>
+            <input type="number" x-model.number="modelForm.concurrency" class="mt-1 w-full border rounded px-3 py-2 text-sm" min="1" max="20"></div>
+        </div>
+
+        <div class="flex items-center gap-2 pt-2">
+          <input type="checkbox" id="model-enabled" x-model="modelForm.enabled" class="rounded">
+          <label for="model-enabled" class="text-sm">启用该模型</label>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3 rounded-b-xl">
+        <button @click="modelModalOpen=false" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">取消</button>
+        <button @click="saveModel()" :disabled="modelSaving" class="px-5 py-2 bg-[#165DFF] hover:bg-blue-600 text-white text-sm rounded-lg disabled:opacity-60">
+          <i class="fas mr-1" :class="modelSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ 字段编辑弹窗 ============ -->
+  <div x-show="fieldModalOpen" x-transition.opacity class="fixed inset-0 bg-black/40 z-40 flex items-start justify-center pt-16 pb-12 overflow-y-auto" @click.self="fieldModalOpen=false">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4" @click.stop>
+      <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+        <h3 class="font-bold text-gray-800" x-text="fieldForm.key ? '编辑字段' : '新增字段'"></h3>
+        <button @click="fieldModalOpen=false" class="text-gray-400 hover:text-gray-600"><i class="fas fa-times text-lg"></i></button>
+      </div>
+      <div class="px-6 py-5 space-y-3">
+        <div>
+          <label class="text-xs text-gray-500">中文名称 <span class="text-red-500">*</span></label>
+          <input type="text" x-model="fieldForm.label" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如：国内运营地">
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">字段解释（会喂给大模型，越具体命中率越高）</label>
+          <textarea x-model="fieldForm.hint" rows="2" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如：公司在中国境内的实际办公/注册经营地，城市级即可"></textarea>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">来源说明（去哪查，会喂给大模型）</label>
+          <textarea x-model="fieldForm.source_note" rows="2" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如：企查查注册地址 / 工商登记地 / 官网备案"></textarea>
+        </div>
+        <div>
+          <div class="flex items-center justify-between">
+            <label class="text-xs text-gray-500">数据源网址（调研时优先访问；最多 20 条）</label>
+            <button type="button" @click="addReferenceUrl()" class="text-xs text-[#165DFF] hover:underline">
+              <i class="fas fa-plus mr-0.5"></i>添加一条
+            </button>
+          </div>
+          <div class="mt-1 space-y-1.5">
+            <template x-for="(r, i) in (fieldForm.reference_urls || [])" :key="i">
+              <div class="flex items-center gap-2">
+                <input type="text" x-model="r.name" placeholder="名称（如：企查查）"
+                       class="w-32 border rounded px-2 py-1.5 text-xs focus:border-[#165DFF] outline-none">
+                <input type="text" x-model="r.url" placeholder="https://..."
+                       class="flex-1 border rounded px-2 py-1.5 text-xs focus:border-[#165DFF] outline-none">
+                <button type="button" @click="removeReferenceUrl(i)"
+                        class="text-gray-400 hover:text-red-500 px-1" title="删除">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </template>
+            <div x-show="!(fieldForm.reference_urls || []).length" class="text-[11px] text-gray-400 italic">
+              暂无；调研时会按全网搜索。建议至少配 1-2 条权威站点（如企查查、官网、LinkedIn Sales Navigator 等）。
+            </div>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs text-gray-500">分组</label>
+          <select x-model="fieldForm.group" class="mt-1 w-full border rounded px-3 py-2 text-sm">
+            <template x-for="g in groupOptions" :key="g.key">
+              <option :value="g.key" x-text="g.label"></option>
+            </template>
+            <option value="__new__">＋ 新建自定义分组…</option>
+          </select>
+          <template x-if="fieldForm.group === '__new__'">
+            <div class="mt-2">
+              <input type="text" x-model="fieldForm.customGroup" maxlength="30"
+                     placeholder="输入新分组名称（不能与已有分组重复）"
+                     class="w-full border rounded px-3 py-2 text-sm focus:border-[#165DFF] outline-none">
+              <div class="text-[10px] text-red-500 mt-0.5" x-show="fieldGroupError" x-text="fieldGroupError"></div>
+            </div>
+          </template>
+        </div>
+        <div class="flex items-center gap-6 pt-1">
+          <label class="flex items-center gap-1.5 text-sm text-gray-600"><input type="checkbox" x-model="fieldForm.enabled" class="rounded">启用</label>
+        </div>
+      </div>
+      <div class="px-6 py-4 border-t border-gray-200 bg-gray-50 flex items-center justify-end gap-3 rounded-b-xl">
+        <button @click="fieldModalOpen=false" class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">取消</button>
+        <button @click="saveFieldDef()" :disabled="fieldSaving" class="px-5 py-2 bg-[#165DFF] hover:bg-blue-600 text-white text-sm rounded-lg disabled:opacity-60">
+          <i class="fas mr-1" :class="fieldSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+        </button>
+      </div>
+    </div>
+  </div>
+
+<script>
+// 模型表单默认值工厂（全局函数，避免 Alpine data() 中 this 初始化竞态）
+function emptyModelForm() {
+  return {
+    name: '', provider: 'anthropic', identifier: '', version: '', description: '',
+    api_url: '', auth_type: 'bearer', api_key: '',
+    custom_headers_text: '', custom_headers_error: '',
+    timeout: 120, max_retries: 3, concurrency: 4, enabled: true,
+  };
+}
+
+function app() {
+  return {
+    tab: 'workspace',
+    mobileNav: false,
+    health: {},
+    me: null,
+    fields: [],
+    noResearch: ['remark'],                     // 后端实际不调研(返回原值)的字段
+    disabledFields: ['remark'],                 // UI 中禁止勾选的字段(仅备注)
+    selectedFields: ['customer_name'],          // 默认勾选公司名称
+    fieldGroupCollapsed: {},                    // 字段范围：分组折叠状态
+    modelOptions: ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001'],
+    model: 'claude-opus-4-8',
+    availableModels: [],   // 来自 /api/models?enabled=1
+    selectedModels: [],    // 用户勾选的模型 id
+    parseRes: null,
+
+    // 输入模式：name = 按确定内容（公司名/APP/区域）；file = 按表格内容
+    inputMode: 'name',
+    companyName: '',
+    appName: '',
+    region: '',
+    customFields: [],   // [{label, hint}]
+    lastReportCustomerId: null,
+    researchError: '',
+
+    customers: [],
+    selectedIds: [],
+    stats: {},
+    kw: '', filterLevel: '', filterRegion: '',
+
+    // 模型管理（嵌入 SPA 的「模型管理」tab）
+    models: [],
+    modelTesting: {},
+    modelTestResult: {},   // { [id]: { state:'testing'|'ok'|'err', text } } 行内即时反馈
+    modelModalOpen: false,
+    modelSaving: false,
+    showKey: false,
+    editingModelId: null,
+    modelForm: emptyModelForm(),
+    // 字段管理（查询字段管理 tab）
+    fieldDefs: [],
+    fieldModalOpen: false,
+    fieldSaving: false,
+    fieldImporting: false,
+    _fieldFromWorkspace: false,
+    fieldMgmtCollapsed: {},   // 字段管理列表：分组折叠状态
+    fieldForm: { key: '', label: '', hint: '', source_note: '', reference_urls: [], group: 'meta', numeric: false, enabled: true, customGroup: '' },
+    fieldGroupError: '',
+    job: null, _pollTimer: null,
+    report: null, reportOpen: false,
+    // 报告人工编辑 / 版本对比
+    reportEditMode: false,
+    reportDraft: {},
+    reportSaving: false,
+    diffMap: {},        // { fieldKey: { old } } 仅含变化项
+    diffActive: false,
+    resolvingKey: null, // 正在快速校验的冲突字段 key
+    resolveValue: '',   // 快速校验选定/填写的值
+    resolveSaving: false,
+    reresearchingKey: null, // 正在单字段重调研的 field key
+    toasts: [],
+    _toastId: 0,
+
+    groupLabels: {
+      basic: '基本信息', app: 'APP', product: '产品', biz: '业务规模',
+      data: '数据', collection: '催收', people: '人员', goal: '目标', meta: '其他', custom: '自定义'
+    },
+
+    async init() {
+      const [hf, ff, mf, mm] = await Promise.all([
+        fetch('/api/health').then(r => r.json()).catch(() => ({})),
+        fetch('/api/fields').then(r => r.json()).catch(() => ({ fields: [] })),
+        fetch('/api/me').then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch('/api/models?enabled=1').then(r => r.json()).catch(() => []),
+      ]);
+      this.health = hf;
+      this.fields = ff.fields || [];
+      this.me = mf?.user || null;
+      this.availableModels = Array.isArray(mm) ? mm : [];
+      // 默认全选所有可用模型
+      this.selectedModels = this.availableModels.map(m => m.id);
+      await this.loadAll();
+    },
+
+    async refreshModels() {
+      this.availableModels = await fetch('/api/models?enabled=1').then(r => r.json()).catch(() => []);
+    },
+
+    // ========== 字段管理（查询字段管理 tab） ==========
+    async loadFieldDefs() {
+      try {
+        const r = await fetch('/api/field-defs', { credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        this.fieldDefs = await r.json();
+      } catch (e) { this.notify('加载字段失败: ' + e, 'err'); }
+    },
+    openFieldNew(fromWorkspace = false) {
+      this.fieldForm = { key: '', label: '', hint: '', source_note: '', reference_urls: [], group: 'meta', numeric: false, enabled: true, customGroup: '' };
+      this.fieldGroupError = '';
+      this._fieldFromWorkspace = fromWorkspace;   // 工作台新增时：保存后自动选中
+      this.fieldModalOpen = true;
+    },
+    openFieldEdit(f) {
+      this._fieldFromWorkspace = false;
+      this.fieldGroupError = '';
+      this.fieldForm = {
+        key: f.key, label: f.label || '', hint: f.hint || '', source_note: f.source_note || '',
+        reference_urls: Array.isArray(f.reference_urls) ? JSON.parse(JSON.stringify(f.reference_urls)) : [],
+        group: f.group || 'custom', numeric: !!f.numeric, enabled: f.enabled !== false, customGroup: '',
+      };
+      this.fieldModalOpen = true;
+    },
+    // 数据源网址行操作
+    addReferenceUrl() {
+      if (!Array.isArray(this.fieldForm.reference_urls)) this.fieldForm.reference_urls = [];
+      if (this.fieldForm.reference_urls.length >= 20) { this.notify('最多 20 条网址', 'err'); return; }
+      this.fieldForm.reference_urls.push({ name: '', url: '' });
+    },
+    removeReferenceUrl(i) {
+      this.fieldForm.reference_urls.splice(i, 1);
+    },
+    // 分组下拉选项：标准分组（不含通用"自定义"）+ 已存在的命名自定义分组
+    get groupOptions() {
+      const std = ['basic','app','product','biz','data','collection','people','goal','meta'];
+      const seen = new Set([...std, 'custom']);   // 'custom' 通用桶不作为可选枚举
+      const opts = std.map(k => ({ key: k, label: this.groupLabels[k] || k }));
+      for (const f of this.fieldDefs) {
+        const g = f.group || 'meta';
+        if (!seen.has(g)) { seen.add(g); opts.push({ key: g, label: this.groupLabels[g] || g }); }
+      }
+      return opts;
+    },
+    async saveFieldDef() {
+      if (!this.fieldForm.label.trim()) { this.notify('请填写中文名称', 'err'); return; }
+      // 解析分组：新建自定义分组时校验非空且不与已有分组重名
+      let group = this.fieldForm.group;
+      this.fieldGroupError = '';
+      if (group === '__new__') {
+        const name = (this.fieldForm.customGroup || '').trim();
+        if (!name) { this.fieldGroupError = '请输入新分组名称'; return; }
+        const norm = (s) => String(s).trim().toLowerCase();
+        const taken = new Set();
+        this.groupOptions.forEach(o => { taken.add(norm(o.key)); taken.add(norm(o.label)); });
+        if (taken.has(norm(name))) { this.fieldGroupError = '该分组名称已存在，请直接在上方下拉选择'; return; }
+        group = name;
+      }
+      this.fieldSaving = true;
+      try {
+        const isEdit = !!this.fieldForm.key;
+        const url = isEdit ? '/api/field-defs/' + this.fieldForm.key : '/api/field-defs';
+        const payload = {
+          label: this.fieldForm.label, hint: this.fieldForm.hint, source_note: this.fieldForm.source_note,
+          reference_urls: (this.fieldForm.reference_urls || []).filter(r => (r.name || '').trim() || (r.url || '').trim()),
+          group, numeric: this.fieldForm.numeric, enabled: this.fieldForm.enabled,
+        };
+        const r = await fetch(url, {
+          method: isEdit ? 'PUT' : 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.fieldModalOpen = false;
+        await this.loadFieldDefs();
+        // 同步刷新工作台用的字段列表（启用字段）
+        this.fields = await fetch('/api/fields').then(r => r.json()).then(d => d.fields || []).catch(() => this.fields);
+        // 工作台新增：自动选中新字段，并展开其所属分组，便于立即可见
+        if (!isEdit && this._fieldFromWorkspace && j.field?.key) {
+          if (!this.selectedFields.includes(j.field.key)) this.selectedFields.push(j.field.key);
+          this.fieldGroupCollapsed[j.field.group || 'custom'] = false;
+        }
+        this._fieldFromWorkspace = false;
+        this.notify('字段已保存', 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.fieldSaving = false; }
+    },
+    async toggleFieldDef(f) {
+      try {
+        await fetch('/api/field-defs/' + f.key + '/toggle', { method: 'POST' });
+        await this.loadFieldDefs();
+        this.fields = await fetch('/api/fields').then(r => r.json()).then(d => d.fields || []).catch(() => this.fields);
+      } catch (e) { this.notify('操作失败: ' + e, 'err'); }
+    },
+    async delFieldDef(f) {
+      const msg = f.builtin ? `「${f.label}」是内置字段，删除后调研/导出将不再包含它。确认删除？` : `确认删除字段「${f.label}」？`;
+      if (!confirm(msg)) return;
+      try {
+        const r = await fetch('/api/field-defs/' + f.key, { method: 'DELETE' });
+        if (!r.ok) throw new Error('删除失败');
+        await this.loadFieldDefs();
+        this.fields = await fetch('/api/fields').then(r => r.json()).then(d => d.fields || []).catch(() => this.fields);
+        this.notify('已删除', 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+    },
+    async importFieldDefs(ev) {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      this.fieldImporting = true;
+      try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const r = await fetch('/api/field-defs/import', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '导入失败');
+        await this.loadFieldDefs();
+        this.fields = await fetch('/api/fields').then(r => r.json()).then(d => d.fields || []).catch(() => this.fields);
+        this.notify(`导入完成：新增 ${j.created}，更新 ${j.updated}`, 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.fieldImporting = false; ev.target.value = ''; }
+    },
+
+    // ========== 模型管理（左侧菜单 tab） ==========
+    async loadModels() {
+      try {
+        const r = await fetch('/api/models', { credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        this.models = await r.json();
+      } catch (e) { this.notify('加载模型失败: ' + e, 'err'); }
+    },
+    openModelNew() {
+      this.editingModelId = null;
+      this.modelForm = emptyModelForm();
+      this.showKey = false;
+      this.modelModalOpen = true;
+    },
+    openModelEdit(m) {
+      this.editingModelId = m.id;
+      this.modelForm = {
+        name: m.name || '', provider: m.provider || 'custom', identifier: m.identifier || '',
+        version: m.version || '', description: m.description || '',
+        api_url: m.api_url || '', auth_type: m.auth_type || 'bearer',
+        api_key: m.api_key_mask || '',   // 默认展示脱敏 key；未修改则保存时跳过
+        _api_key_mask: m.api_key_mask || '',
+        custom_headers_text: m.custom_headers ? JSON.stringify(m.custom_headers, null, 2) : '',
+        custom_headers_error: '',
+        timeout: m.timeout || 120, max_retries: m.max_retries || 3, concurrency: m.concurrency || 4,
+        enabled: m.enabled !== false,
+      };
+      this.showKey = false;
+      this.modelModalOpen = true;
+    },
+    async saveModel() {
+      let headers = {};
+      if (this.modelForm.custom_headers_text.trim()) {
+        try { headers = JSON.parse(this.modelForm.custom_headers_text); }
+        catch (e) { this.modelForm.custom_headers_error = 'JSON 格式错误: ' + e.message; return; }
+      }
+      this.modelForm.custom_headers_error = '';
+      if (!this.modelForm.name || !this.modelForm.api_url || !this.modelForm.identifier) {
+        this.notify('名称 / 标识符 / API URL 必填', 'err'); return;
+      }
+      this.modelSaving = true;
+      const body = { ...this.modelForm, custom_headers: headers };
+      delete body.custom_headers_text; delete body.custom_headers_error; delete body._api_key_mask;
+      // 编辑时若 key 仍为脱敏原值（未改动），则不提交 api_key（后端保持原值）
+      if (this.editingModelId && this.modelForm._api_key_mask && this.modelForm.api_key === this.modelForm._api_key_mask) {
+        delete body.api_key;
+      }
+      try {
+        const url = this.editingModelId ? `/api/models/${this.editingModelId}` : '/api/models';
+        const method = this.editingModelId ? 'PUT' : 'POST';
+        const r = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.notify(this.editingModelId ? '已更新' : '已新增', 'ok');
+        this.modelModalOpen = false;
+        await this.loadModels();
+        await this.refreshModels();   // 同步工作台的模型多选列表
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      } finally { this.modelSaving = false; }
+    },
+    async toggleModel(m) {
+      try {
+        const r = await fetch(`/api/models/${m.id}/toggle`, { method: 'POST', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        if (!r.ok) throw new Error((await r.json()).error || '切换失败');
+        await this.loadModels();
+        await this.refreshModels();
+      } catch (e) { this.notify(String(e.message), 'err'); }
+    },
+    async delModel(m) {
+      if (!confirm(`确认删除模型「${m.name}」?`)) return;
+      try {
+        const r = await fetch(`/api/models/${m.id}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        if (!r.ok) throw new Error((await r.json()).error || '删除失败');
+        this.notify('已删除', 'ok');
+        await this.loadModels();
+        await this.refreshModels();
+      } catch (e) { this.notify(String(e.message), 'err'); }
+    },
+    async testModel(m) {
+      if (!m || !m.id) { this.notify('参数错误:模型 id 缺失', 'err'); return; }
+      if (this.modelTesting && this.modelTesting[m.id]) return;  // 防重复点击
+      this.modelTesting = { ...this.modelTesting, [m.id]: true };
+      this.modelTestResult = { ...this.modelTestResult, [m.id]: { state: 'testing', text: '测试中…' } };
+      this.notify(`正在测试 ${m.name}…`, 'info');   // 即时反馈
+      try {
+        const r = await fetch(`/api/models/${m.id}/test`, { method: 'POST', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        let j; try { j = await r.json(); } catch { j = { ok: false, error: 'HTTP ' + r.status }; }
+        this.modelTestResult = { ...this.modelTestResult, [m.id]: {
+          state: j.ok ? 'ok' : 'err',
+          text: j.ok ? `✓ 通过 ${j.latencyMs}ms` : `✗ ${(j.error || '失败').slice(0, 40)}`,
+        } };
+        this.notify(j.ok ? `✓ ${m.name} 连通正常 (${j.latencyMs}ms)` : `✗ ${m.name} 失败：${j.error || '未知错误'}`, j.ok ? 'ok' : 'err');
+        await this.loadModels();
+      } catch (e) {
+        this.modelTestResult = { ...this.modelTestResult, [m.id]: { state: 'err', text: '✗ ' + (e?.message || e) } };
+        this.notify('测试失败: ' + (e?.message || e), 'err');
+      } finally {
+        this.modelTesting = { ...this.modelTesting, [m.id]: false };
+      }
+    },
+    async logout() {
+      try { await fetch('/api/logout', { method: 'POST' }); } catch {}
+      location.replace('/login.html');
+    },
+
+    notify(msg, type='info') {
+      const id = ++this._toastId;
+      this.toasts.push({ id, msg, type });
+      setTimeout(() => { this.toasts = this.toasts.filter(x => x.id !== id); }, 3500);
+    },
+
+    async upload(ev) {
+      const f = ev.target.files?.[0];
+      if (!f) return;
+      const fd = new FormData();
+      fd.append('file', f);
+      try {
+        const r = await fetch('/api/upload', { method: 'POST', body: fd });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '上传失败');
+        this.parseRes = j;
+        this.notify(`已识别 ${j.customer_count} 条客户、${j.field_count} 个字段`, 'ok');
+        await this.loadAll();
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      }
+    },
+
+    addCustomField() {
+      this.customFields.push({ label: '', hint: '' });
+    },
+
+    // ===== 字段范围：按分组展示 + 交互 =====
+    get groupedSelectFields() {
+      const map = {};
+      for (const f of this.fields) {
+        const g = f.group || 'meta';
+        if (!map[g]) map[g] = [];
+        map[g].push(f);
+      }
+      const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      const keys = [...order.filter(g => map[g]), ...Object.keys(map).filter(g => !order.includes(g))];
+      return keys.map(g => [g, map[g]]);
+    },
+    // 字段管理列表：按分组聚合（含停用字段）
+    get groupedFieldDefs() {
+      const map = {};
+      for (const f of this.fieldDefs) {
+        const g = f.group || 'meta';
+        if (!map[g]) map[g] = [];
+        map[g].push(f);
+      }
+      const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      const keys = [...order.filter(g => map[g]), ...Object.keys(map).filter(g => !order.includes(g))];
+      return keys.map(g => [g, map[g]]);
+    },
+    selectableKeys(items) {
+      return items.filter(f => !this.disabledFields.includes(f.key)).map(f => f.key);
+    },
+    groupSelectableCount(items) { return this.selectableKeys(items).length; },
+    groupSelectedCount(items) {
+      return this.selectableKeys(items).filter(k => this.selectedFields.includes(k)).length;
+    },
+    isGroupAllSelected(items) {
+      const ks = this.selectableKeys(items);
+      return ks.length > 0 && ks.every(k => this.selectedFields.includes(k));
+    },
+    toggleField(key) {
+      const i = this.selectedFields.indexOf(key);
+      if (i >= 0) this.selectedFields.splice(i, 1);
+      else this.selectedFields.push(key);
+    },
+    toggleGroup(items) {
+      const ks = this.selectableKeys(items);
+      if (this.isGroupAllSelected(items)) {
+        this.selectedFields = this.selectedFields.filter(k => !ks.includes(k));
+      } else {
+        const set = new Set(this.selectedFields);
+        ks.forEach(k => set.add(k));
+        this.selectedFields = [...set];
+      }
+    },
+    selectAllFields() {
+      this.selectedFields = this.fields.filter(f => !this.disabledFields.includes(f.key)).map(f => f.key);
+    },
+
+    async runResearch() {
+      if (!this.canResearch || this.job?.status === 'running') return;
+      this.researchError = '';
+      const fieldsBody = this.selectedFields.length ? this.selectedFields : undefined;
+      const modelsBody = this.selectedModels.length ? this.selectedModels : undefined;
+      // 自定义字段:仅取 label 非空的
+      const customBody = (this.customFields || [])
+        .map(c => ({ label: String(c.label || '').trim(), hint: String(c.hint || '').trim() }))
+        .filter(c => c.label);
+      try {
+        let j;
+        if (this.inputMode === 'name') {
+          const name = this.companyName.trim();
+          const app = this.appName.trim();
+          const region = this.region.trim();
+          if (!name && !app) { this.researchError = '请填写公司名称或 APP 名称（展业区域不能单独作为查询条件）'; return; }
+          // 客户记录名称兜底:有公司名用公司名,否则 APP@区域 / APP / 区域
+          const fallbackName = name || (app && region ? `${app} @ ${region}` : (app || region));
+          const body = { name: fallbackName };
+          if (name) body.customer_name_input = name;   // 让后端区分"用户填的公司名"vs 兜底
+          if (app) body.app_name = app;
+          if (region) body.region = region;
+          if (modelsBody) body.models = modelsBody;
+          if (fieldsBody) body.fields = fieldsBody;
+          if (customBody.length) body.custom_fields = customBody;
+          const r = await fetch('/api/research/by-name', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          j = await r.json();
+          if (!r.ok) throw new Error(j.error || '触发失败');
+          this.lastReportCustomerId = j.customer?.id || null;
+        } else {
+          const body = {};
+          if (modelsBody) body.models = modelsBody;
+          if (fieldsBody) body.fields = fieldsBody;
+          if (customBody.length) body.custom_fields = customBody;
+          const r = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+          j = await r.json();
+          if (!r.ok) throw new Error(j.error || '触发失败');
+          this.lastReportCustomerId = null;
+        }
+        this.job = j.job;            // 进度与每步进展直接展示在进度条下方，不再弹窗
+        this.pollJob();
+      } catch (e) {
+        this.researchError = String(e.message || e);
+      }
+    },
+
+    pollJob() {
+      clearInterval(this._pollTimer);
+      this._pollTimer = setInterval(async () => {
+        if (!this.job) return clearInterval(this._pollTimer);
+        try {
+          const r = await fetch('/api/jobs/' + this.job.id).then(r => r.json());
+          this.job = r;
+          // 自动滚到最新步骤
+          this.$nextTick(() => { const box = this.$refs.stepBox; if (box) box.scrollTop = box.scrollHeight; });
+          if (r.status === 'done' || r.status === 'failed') {
+            clearInterval(this._pollTimer);
+            await this.loadAll();
+          }
+        } catch {}
+      }, 1500);
+    },
+
+    get canResearch() {
+      if (!this.selectedModels.length) return false;
+      if (this.inputMode === 'name') {
+        // 公司名 / APP 名 至少填一个（区域不能单独查询）
+        return !!(this.companyName.trim() || this.appName.trim());
+      }
+      return !!this.parseRes;
+    },
+    get researchTargetDesc() {
+      if (this.inputMode === 'name') {
+        const n = this.companyName.trim();
+        const a = this.appName.trim();
+        const r = this.region.trim();
+        return n || a || r || '该客户';
+      }
+      return (this.parseRes?.customer_count || 0) + ' 名客户';
+    },
+    get customFieldCount() {
+      return (this.customFields || []).filter(c => String(c.label || '').trim()).length;
+    },
+    get totalFieldCount() {
+      const base = this.selectedFields.length || (this.fields.length - this.noResearch.length);
+      return base + this.customFieldCount;
+    },
+    get jobStatusText() {
+      return { running: '调研中', done: '已完成', failed: '失败', pending: '排队中' }[this.job?.status] || (this.job?.status || '');
+    },
+    stepIcon(s) {
+      if (s === 'filled' || s === 'agree') return 'fa-circle-check text-green-500';
+      if (s === 'conflict') return 'fa-triangle-exclamation text-red-500';
+      if (s === 'error') return 'fa-circle-xmark text-red-400';
+      if (s === 'unknown') return 'fa-circle-minus text-gray-400';
+      return 'fa-circle-notch text-gray-300';
+    },
+    stepStatusZh(s) {
+      return { filled: '已补全', agree: '已验证一致', conflict: '发现冲突', unknown: '未找到公开来源', error: '执行异常' }[s] || s;
+    },
+
+    async loadAll() {
+      await Promise.all([this.loadCustomers(), this.loadStats()]);
+    },
+
+    async loadCustomers() {
+      const params = new URLSearchParams();
+      if (this.kw) params.set('q', this.kw);
+      if (this.filterLevel) params.set('level', this.filterLevel);
+      if (this.filterRegion) params.set('region', this.filterRegion);
+      this.customers = await fetch('/api/customers?' + params.toString()).then(r => r.json());
+      // 清掉已不在当前列表中的选中项（搜索过滤后保持一致性）
+      const valid = new Set(this.customers.map(c => c.id));
+      this.selectedIds = this.selectedIds.filter(id => valid.has(id));
+    },
+
+    selectAll() {
+      this.selectedIds = this.customers.map(c => c.id);
+    },
+    clearSelection() {
+      this.selectedIds = [];
+    },
+
+    async loadStats() {
+      this.stats = await fetch('/api/stats').then(r => r.json());
+    },
+
+    async openReport(id) {
+      this.reportEditMode = false; this.reportDraft = {}; this.diffMap = {}; this.diffActive = false;
+      this.resolvingKey = null; this.resolveValue = '';
+      this.report = await fetch(`/api/customers/${id}/report`).then(r => r.json());
+      this.reportOpen = true;
+    },
+    async delCustomer(c) {
+      if (!confirm(`确认删除客户「${c.customer_name || c.id}」？将一并删除其调研结果与历史版本，且不可恢复。`)) return;
+      try {
+        const r = await fetch(`/api/customers/${c.id}`, { method: 'DELETE', credentials: 'same-origin' });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        if (!r.ok) throw new Error((await r.json()).error || '删除失败');
+        // 若正打开该客户报告则关闭
+        if (this.report?.customer?.id === c.id) this.reportOpen = false;
+        this.selectedIds = this.selectedIds.filter(id => id !== c.id);
+        await this.loadAll();
+        this.notify('客户已删除', 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+    },
+
+    // 进入人工编辑：把当前各字段值灌进 reportDraft
+    enterReportEdit() {
+      const draft = {};
+      for (const f of this.fields) {
+        const r = this.report?.fields?.[f.key];
+        draft[f.key] = r ? (r.value || (r.values && r.values[0]) || '') : '';
+      }
+      this.reportDraft = draft;
+      this.reportEditMode = true;
+      this.diffActive = false; this.diffMap = {};
+    },
+    startEditField(f) {
+      if (this.reportEditMode) return;
+      this.enterReportEdit();
+    },
+    cancelReportEdit() { this.reportEditMode = false; this.reportDraft = {}; },
+
+    // 冲突字段快速校验：选一个调研值或自定义填写，保存为人工值
+    startResolve(f) {
+      this.resolvingKey = f.key;
+      this.resolveValue = (f.r?.values && f.r.values[0]) || f.r?.value || '';
+    },
+    cancelResolve() { this.resolvingKey = null; this.resolveValue = ''; },
+    async saveResolve(f) {
+      const id = this.report?.customer?.id;
+      const val = (this.resolveValue || '').trim();
+      if (!id) return;
+      if (!val) { this.notify('请选择或填写一个值', 'err'); return; }
+      this.resolveSaving = true;
+      try {
+        const r = await fetch(`/api/customers/${id}/manual`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { [f.key]: val } }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.report = j.report;
+        this.resolvingKey = null;
+        this.resolveValue = '';
+        this.notify('已校验，该字段已更新', 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.resolveSaving = false; }
+    },
+
+    // 保存人工补充；updateAfter=true 时再对空值/unknown 字段重新调研
+    async saveReportManual(updateAfter) {
+      const id = this.report?.customer?.id;
+      if (!id) return;
+      this.reportSaving = true;
+      try {
+        // 仅提交相对原值有改动的字段
+        const fields = {};
+        for (const f of this.fields) {
+          const r = this.report?.fields?.[f.key];
+          const orig = r ? (r.value || (r.values && r.values[0]) || '') : '';
+          const cur = (this.reportDraft[f.key] || '').trim();
+          if (cur !== String(orig || '').trim()) fields[f.key] = cur;
+        }
+        const r = await fetch(`/api/customers/${id}/manual`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.report = j.report;
+        this.reportEditMode = false;
+        if (updateAfter) {
+          this.notify('已保存，正在对空字段重新调研…', 'ok');
+          const rr = await fetch('/api/research', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ customer_ids: [id], only_missing: true }),
+          });
+          const jj = await rr.json();
+          if (rr.ok && jj.job) {
+            this.job = jj.job; this.lastReportCustomerId = id; this.pollJob();
+            this.tab = 'workspace';
+          } else {
+            this.notify(jj.error || '没有需要补充的空字段', 'err');
+          }
+        } else {
+          this.notify('已保存', 'ok');
+        }
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.reportSaving = false; }
+    },
+
+    // 单字段重新调研：按该字段配置的数据源重新查，仅刷新当前报告，不跳页
+    async reresearchField(fieldKey) {
+      const id = this.report?.customer?.id;
+      if (!id || !fieldKey) return;
+      if (this.reresearchingKey) { this.notify('已有字段正在重调研，请稍候', 'err'); return; }
+      this.reresearchingKey = fieldKey;
+      try {
+        const rr = await fetch('/api/research', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_ids: [id], fields: [fieldKey], models: this.selectedModels }),
+        });
+        const jj = await rr.json();
+        if (!rr.ok || !jj.job) throw new Error(jj.error || '发起调研失败');
+        // 轮询该 job 完成后只刷新当前报告
+        const jobId = jj.job.id;
+        await new Promise((resolve) => {
+          const timer = setInterval(async () => {
+            try {
+              const jr = await fetch('/api/jobs/' + jobId).then(r => r.json());
+              if (jr.status === 'done' || jr.status === 'failed') {
+                clearInterval(timer); resolve();
+              }
+            } catch { clearInterval(timer); resolve(); }
+          }, 1500);
+        });
+        // 重新拉取报告，刷新该字段
+        this.report = await fetch(`/api/customers/${id}/report`).then(r => r.json());
+        this.notify(`「${this.fields.find(f=>f.key===fieldKey)?.label || fieldKey}」已重新调研`, 'ok');
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      } finally {
+        this.reresearchingKey = null;
+      }
+    },
+
+    // 版本对比：当前报告 vs 最近一个快照，逐字段标差异
+    async compareVersions() {
+      const id = this.report?.customer?.id;
+      if (!id) return;
+      try {
+        const r = await fetch(`/api/customers/${id}/report-versions`);
+        const j = await r.json();
+        if (!j.versions || !j.versions.length) { this.notify('暂无历史版本可对比（先保存一次会产生版本）', 'err'); return; }
+        const snap = await fetch(`/api/report-versions/${j.versions[0].id}`).then(x => x.json());
+        const oldFields = snap.fields || {};
+        const cur = j.current?.fields || this.report?.fields || {};
+        const diff = {};
+        for (const f of this.fields) {
+          const o = oldFields[f.key]; const c = cur[f.key];
+          const ov = o ? (o.value || (o.values && o.values.join('/')) || '') : '';
+          const cv = c ? (c.value || (c.values && c.values.join('/')) || '') : '';
+          if (String(ov).trim() !== String(cv).trim()) diff[f.key] = { old: ov };
+        }
+        this.report = { ...this.report, fields: cur };
+        this.diffMap = diff;
+        this.diffActive = true;
+        if (!Object.keys(diff).length) this.notify('与上一版无差异', 'ok');
+      } catch (e) { this.notify('版本对比失败: ' + e, 'err'); }
+    },
+    get diffCount() { return Object.keys(this.diffMap || {}).length; },
+
+    cellClass(f) {
+      if (!f.r) return 'cell-unknown';
+      if (f.r.status === 'conflict') return 'cell-conflict';
+      if (f.r.status === 'manual') return 'cell-filled';
+      if (f.r.status === 'filled' || f.r.status === 'agree') return 'cell-filled';
+      if (f.r.status === 'known') return 'cell-known';
+      return 'cell-unknown';
+    },
+
+    get reportConflictCount() {
+      if (!this.report) return 0;
+      return Object.values(this.report.fields || {}).filter(r => r.status === 'conflict').length;
+    },
+
+    get groupedReport() {
+      if (!this.report) return [];
+      const map = {};
+      for (const f of this.fields) {
+        const r = this.report.fields?.[f.key];
+        const g = f.group || 'meta';
+        if (!map[g]) map[g] = [];
+        map[g].push({ key: f.key, label: f.label, r, hint: f.hint, source_note: f.source_note, reference_urls: f.reference_urls || [] });
+      }
+      const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      return order.filter(g => map[g]).map(g => [g, map[g]]);
+    },
+  };
+}
+</script>
+</body>
+</html>
