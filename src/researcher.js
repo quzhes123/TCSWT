@@ -209,7 +209,11 @@ async function execClientTool(toolUse, state) {
     if (r.results.length === 0) {
       return mkResult(id, { query: r.query, results: [], guidance: '本次查询无结果。可换关键词；若已尝试 ≥2 次均无果请直接 record_finding(unknown)。' });
     }
-    return mkResult(id, { query: r.query, results: r.results });
+    // Tavily 用量超限已自动降级到公共网页搜索时，提示模型来源可靠性可能下降
+    const extra = r.degraded === 'tavily_quota_exceeded'
+      ? { notice: 'Tavily 用量超限，已自动切换公共网页搜索（结果质量可能略降，请注意核验来源）。' }
+      : {};
+    return mkResult(id, { query: r.query, results: r.results, provider: r.provider, ...extra });
   }
   if (name === 'fetch_page') {
     if (state.fetchCount >= MAX_FETCH_PER_FIELD) {

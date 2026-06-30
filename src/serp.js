@@ -18,8 +18,17 @@ const MAX_RESULTS = 6;
 const MAX_SNIPPET = 280;
 const MAX_PAGE_CHARS = 6000;
 
-/** 是否启用真实搜索 */
-export const SEARCH_ENABLED = PROVIDER !== 'none';
+// Tavily 用量超限（432）/限流（429）后，进程级粘滞降级到公共搜索，
+// 避免后续每个字段都先撞一次 432 再降级（省时间、止损）。
+let tavilyExhausted = false;
+
+/** 公共搜索始终可用（无需 key），用作 Tavily 超限后的兜底 */
+export const SEARCH_ENABLED = true;
+
+/** 判断 Tavily 响应是否属于「用量超限/限流」——需要降级到公共搜索 */
+function isTavilyQuotaError(status) {
+  return status === 432 || status === 429;
+}
 
 /**
  * 受控搜索：返回标准化 [{title, url, snippet, source}]
@@ -29,9 +38,24 @@ export async function webSearch(query, opts = {}) {
   if (!SEARCH_ENABLED) {
     return { ok: false, reason: '未配置搜索 API（请在 .env 设置 TAVILY_API_KEY 或 SERPAPI_API_KEY）', query, results: [] };
   }
-  if (PROVIDER === 'tavily') return tavilySearch(query, opts);
+  // 已知 Tavily 超限：直接走公共搜索，不再浪费一次 432 请求
+  if (PROVIDER === 'tavily' && tavilyExhausted) {
+    return publicSearch(query, opts);
+  }
+  if (PROVIDER === 'tavily') {
+    const r = await tavilySearch(query, opts);
+    // 432/429 用量超限 → 本次即降级公共搜索，并标记后续都走公共搜索
+    if (!r.ok && r.quotaExceeded) {
+      tavilyExhausted = true;
+      const pub = await publicSearch(query, opts);
+      if (pub.ok) pub.degraded = 'tavily_quota_exceeded';
+      return pub;
+    }
+    return r;
+  }
   if (PROVIDER === 'serpapi') return serpapiSearch(query, opts);
-  return { ok: false, reason: 'unknown SEARCH_PROVIDER: ' + PROVIDER, query, results: [] };
+  // 未配置任何付费 provider：直接用公共搜索
+  return publicSearch(query, opts);
 }
 
 // ===== Tavily =====
@@ -57,7 +81,8 @@ async function tavilySearch(query, { num = MAX_RESULTS, includeDomains } = {}) {
     if (!r.ok) {
       let detail = '';
       try { detail = (await r.text()).slice(0, 200); } catch {}
-      return { ok: false, reason: `tavily http ${r.status} ${detail}`, query, results: [] };
+      const quotaExceeded = isTavilyQuotaError(r.status);
+      return { ok: false, reason: `tavily http ${r.status} ${detail}`, quotaExceeded, query, results: [] };
     }
     const j = await r.json();
     const out = (j.results || []).slice(0, num).map(it => ({
@@ -107,6 +132,103 @@ async function serpapiSearch(query, { num = MAX_RESULTS, hl = 'zh-cn' } = {}) {
   } catch (e) {
     return { ok: false, reason: 'serpapi error: ' + (e?.message || e), query, results: [] };
   }
+}
+
+// ===== 公共网页搜索（Brave Search HTML，无需 API key）=====
+// 作为 Tavily 用量超限后的兜底；从公开搜索结果页解析标题/链接/摘要。
+const PUBLIC_UA = 'Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0';
+
+// 公共搜索串行节流：免费端点对并发/突发很敏感，串行 + 间隔可显著降低 429/封禁概率。
+const PUBLIC_MIN_INTERVAL_MS = 1500;
+let _publicChain = Promise.resolve();
+let _lastPublicAt = 0;
+
+function throttlePublic(fn) {
+  const run = _publicChain.then(async () => {
+    const wait = PUBLIC_MIN_INTERVAL_MS - (Date.now() - _lastPublicAt);
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    try { return await fn(); }
+    finally { _lastPublicAt = Date.now(); }
+  });
+  // 链条不因单次失败中断
+  _publicChain = run.then(() => {}, () => {});
+  return run;
+}
+
+export async function publicSearch(query, opts = {}) {
+  if (!query || !String(query).trim()) {
+    return { ok: false, reason: 'empty query', query, results: [] };
+  }
+  return throttlePublic(() => braveSearchOnce(query, opts));
+}
+
+async function braveSearchOnce(query, { num = MAX_RESULTS, _retried = false } = {}) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), SEARCH_TIMEOUT_MS);
+    const url = 'https://search.brave.com/search?q=' + encodeURIComponent(query) + '&source=web';
+    const r = await fetch(url, {
+      signal: ctrl.signal,
+      redirect: 'follow',
+      headers: {
+        'User-Agent': PUBLIC_UA,
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      },
+    });
+    clearTimeout(t);
+    // 429 限流：退避后重试一次
+    if (r.status === 429 && !_retried) {
+      await new Promise(res => setTimeout(res, 3000));
+      return braveSearchOnce(query, { num, _retried: true });
+    }
+    if (!r.ok) return { ok: false, reason: `public search http ${r.status}`, query, results: [] };
+    const html = await r.text();
+    if (/CAPTCHA|captcha|verify you are|unusual traffic/i.test(html) && !/result-wrapper/.test(html)) {
+      return { ok: false, reason: 'public search blocked (captcha)', query, results: [] };
+    }
+    const results = parseBraveResults(html, num);
+    if (results.length === 0) {
+      return { ok: false, reason: 'public search returned no parseable results', query, results: [] };
+    }
+    return { ok: true, query, results, provider: 'public:brave' };
+  } catch (e) {
+    return { ok: false, reason: 'public search error: ' + (e?.message || e), query, results: [] };
+  }
+}
+
+/** 解析 Brave Search 结果页 HTML → [{title,url,snippet,source}] */
+function parseBraveResults(html, num = MAX_RESULTS) {
+  const out = [];
+  const blocks = String(html).split(/class="result-wrapper/).slice(1);
+  for (const b of blocks) {
+    const urlM = b.match(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*class="[^"]*\bl1\b[^"]*"/i)
+              || b.match(/<a[^>]+class="[^"]*\bl1\b[^"]*"[^>]*href="(https?:\/\/[^"]+)"/i)
+              || b.match(/href="(https?:\/\/[^"]+)"/i);
+    if (!urlM) continue;
+    const url = urlM[1];
+    if (/brave\.com|search\.brave|imgs\.search/.test(url)) continue;
+    const titleM = b.match(/class="title[^"]*"[^>]*title="([^"]+)"/i)
+               || b.match(/class="title[^"]*">([\s\S]*?)<\/div>/i);
+    const snipM  = b.match(/class="content [^"]*">([\s\S]*?)<\/div>/i);
+    out.push({
+      title:   titleM ? stripTags(titleM[1]).slice(0, 160) : '',
+      url,
+      snippet: snipM ? stripTags(snipM[1]).slice(0, MAX_SNIPPET) : '',
+      source:  safeHost(url),
+    });
+    if (out.length >= num) break;
+  }
+  return out;
+}
+
+function stripTags(s) {
+  return String(s || '')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function safeHost(u) {
