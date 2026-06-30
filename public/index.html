@@ -318,20 +318,22 @@
                 <button class="text-xs text-[#165DFF] hover:underline" @click.stop="toggleGroup(items)"
                         x-text="isGroupAllSelected(items) ? '取消本组' : '全选本组'"></button>
               </div>
-              <!-- 分组内字段：chip 风格 -->
-              <div x-show="!fieldGroupCollapsed[group]" class="p-3 flex flex-wrap gap-2">
+              <!-- 分组内字段：紧凑网格布局 -->
+              <div x-show="!fieldGroupCollapsed[group]" class="p-2.5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-1.5">
                 <template x-for="f in items" :key="f.key">
                   <button type="button"
                           @click="!disabledFields.includes(f.key) && toggleField(f.key)"
                           :disabled="disabledFields.includes(f.key)"
-                          class="px-3 py-1.5 rounded-full text-xs border transition-colors flex items-center gap-1.5"
+                          :title="f.label"
+                          class="px-2.5 py-1.5 rounded-md text-xs border transition-all flex items-center gap-1.5 w-full text-left"
                           :class="disabledFields.includes(f.key)
-                            ? 'opacity-40 cursor-not-allowed border-gray-200 text-gray-400'
+                            ? 'opacity-40 cursor-not-allowed border-gray-200 text-gray-400 bg-gray-50'
                             : (selectedFields.includes(f.key)
-                                ? 'bg-blue-50 border-[#165DFF] text-[#165DFF] font-medium'
-                                : 'border-gray-200 text-gray-600 hover:border-[#165DFF] hover:text-[#165DFF]')">
-                    <i class="fas text-[10px]" :class="selectedFields.includes(f.key) ? 'fa-circle-check' : 'fa-circle'"></i>
-                    <span x-text="f.label"></span>
+                                ? 'bg-[#165DFF] border-[#165DFF] text-white font-medium shadow-sm'
+                                : 'bg-white border-gray-200 text-gray-600 hover:border-[#165DFF] hover:bg-blue-50/40 hover:text-[#165DFF]')">
+                    <i class="fas text-[11px] flex-shrink-0"
+                       :class="selectedFields.includes(f.key) ? 'fa-circle-check' : 'fa-circle text-gray-300'"></i>
+                    <span class="truncate" x-text="f.label"></span>
                   </button>
                 </template>
               </div>
@@ -590,13 +592,14 @@
                     <template x-if="!m.last_test_at"><span class="text-gray-400">未测试</span></template>
                   </td>
                   <td class="px-4 py-3 text-center whitespace-nowrap">
-                    <button type="button"
-                            @click.stop.prevent="testModel(m)"
-                            :disabled="modelTesting && modelTesting[m.id]"
-                            class="text-[#165DFF] hover:underline text-xs mr-2"
-                            :class="(modelTesting && modelTesting[m.id]) ? 'opacity-50' : ''">
+                    <button type="button" @click.stop.prevent="testModel(m)" class="text-[#165DFF] hover:underline text-xs mr-2">
                       <i class="fas mr-1" :class="(modelTesting && modelTesting[m.id]) ? 'fa-spinner fa-spin' : 'fa-bolt'"></i>测试
                     </button>
+                    <template x-if="modelTestResult[m.id]">
+                      <span class="text-[11px] mr-2"
+                            :class="modelTestResult[m.id].state==='ok' ? 'text-green-600' : (modelTestResult[m.id].state==='err' ? 'text-red-500' : 'text-gray-400')"
+                            x-text="modelTestResult[m.id].text"></span>
+                    </template>
                     <button type="button" @click.stop.prevent="openModelEdit(m)" class="text-gray-600 hover:underline text-xs mr-2"><i class="fas fa-pen mr-1"></i>编辑</button>
                     <button type="button" @click.stop.prevent="delModel(m)" class="text-red-500 hover:underline text-xs"><i class="fas fa-trash mr-1"></i>删除</button>
                   </td>
@@ -664,7 +667,19 @@
                         <div class="font-medium" x-text="f.label"></div>
                       </td>
                       <td class="px-4 py-3 text-xs text-gray-600 max-w-xs"><div class="line-clamp-2" x-text="f.hint || '—'"></div></td>
-                      <td class="px-4 py-3 text-xs text-gray-600 max-w-xs"><div class="line-clamp-2" x-text="f.source_note || '—'"></div></td>
+                      <td class="px-4 py-3 text-xs text-gray-600 max-w-xs">
+                        <div class="line-clamp-2" x-text="f.source_note || '—'"></div>
+                        <div x-show="(f.reference_urls || []).length" class="mt-1 flex flex-wrap gap-1">
+                          <template x-for="r in (f.reference_urls || [])" :key="r.url || r.name">
+                            <a :href="r.url" target="_blank" rel="noopener"
+                               class="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded bg-blue-50 text-[#165DFF] hover:bg-blue-100"
+                               :title="r.url">
+                              <i class="fas fa-link text-[9px]"></i>
+                              <span x-text="r.name || r.url"></span>
+                            </a>
+                          </template>
+                        </div>
+                      </td>
                       <td class="px-4 py-3 text-center">
                         <button @click="toggleFieldDef(f)" class="text-xs" :class="f.enabled!==false ? 'tag tag-green' : 'tag tag-gray'">
                           <i class="fas mr-1" :class="f.enabled!==false ? 'fa-toggle-on' : 'fa-toggle-off'"></i>
@@ -746,26 +761,98 @@
             <template x-for="f in items" :key="f.key">
               <div class="rounded p-3" :class="[cellClass(f), diffMap[f.key] ? 'ring-2 ring-amber-400 bg-amber-50' : '']">
                 <div class="text-xs text-gray-500 mb-1 flex items-center justify-between">
-                  <span x-text="f.label"></span>
-                  <span x-show="diffMap[f.key]" class="text-[10px] text-amber-600"><i class="fas fa-arrow-trend-up mr-0.5"></i>已变化</span>
+                  <span class="flex items-center gap-1">
+                    <span x-text="f.label"></span>
+                    <span x-show="diffMap[f.key]" class="text-[10px] text-amber-600"><i class="fas fa-arrow-trend-up mr-0.5"></i>已变化</span>
+                  </span>
+                  <button type="button" x-show="!reportEditMode"
+                          @click="reresearchField(f.key)"
+                          :disabled="reresearchingKey === f.key || (job && job.status==='running')"
+                          class="text-[10px] text-[#165DFF] hover:underline disabled:opacity-50 disabled:no-underline whitespace-nowrap"
+                          :title="'按该字段配置的数据源重新调研'">
+                    <i class="fas mr-0.5" :class="reresearchingKey === f.key ? 'fa-spinner fa-spin' : 'fa-rotate'"></i>
+                    <span x-text="reresearchingKey === f.key ? '调研中' : '重新调研'"></span>
+                  </button>
                 </div>
+                <!-- 字段含义 + 推荐数据源（看报告时直接知道数据该来自哪） -->
+                <template x-if="!reportEditMode && (f.hint || (f.reference_urls||[]).length)">
+                  <div class="text-[10px] text-gray-400 mb-1.5 space-y-0.5">
+                    <div x-show="f.hint" class="line-clamp-1" :title="f.hint"><i class="fas fa-circle-info mr-0.5"></i><span x-text="f.hint"></span></div>
+                    <div x-show="(f.reference_urls||[]).length" class="flex flex-wrap gap-1">
+                      <template x-for="r in (f.reference_urls||[])" :key="r.url || r.name">
+                        <a :href="r.url" target="_blank" rel="noopener" class="text-[#165DFF] hover:underline" :title="r.url"><span x-text="r.name || r.url"></span></a>
+                      </template>
+                    </div>
+                  </div>
+                </template>
 
-                <!-- 编辑模式：可编辑输入框 -->
+                <!-- 编辑模式（批量）：可编辑输入框 -->
                 <template x-if="reportEditMode">
                   <input type="text" x-model="reportDraft[f.key]"
                          class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#165DFF] focus:ring-1 focus:ring-[#165DFF]/20 outline-none"
                          :placeholder="f.label">
                 </template>
 
+                <!-- 单字段行内编辑：双击触发，仅当前字段进入编辑 -->
+                <template x-if="!reportEditMode && editingKey === f.key">
+                  <div class="space-y-1.5" @click.stop @dblclick.stop>
+                    <input type="text" x-model="editDraft" :placeholder="f.label"
+                           x-init="$nextTick(() => $el.focus())"
+                           @keydown.enter="saveFieldEdit(f)" @keydown.escape="cancelFieldEdit()"
+                           class="w-full border border-[#165DFF] rounded px-2 py-1 text-sm focus:ring-1 focus:ring-[#165DFF]/20 outline-none">
+                    <div class="flex items-center gap-2">
+                      <button @click="saveFieldEdit(f)" :disabled="editSaving"
+                              class="text-xs px-3 py-1 rounded bg-[#165DFF] text-white hover:bg-blue-600 disabled:opacity-60 flex items-center gap-1">
+                        <i class="fas" :class="editSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+                      </button>
+                      <button @click="cancelFieldEdit()" class="text-xs px-2 py-1 text-gray-500 hover:text-gray-700">取消</button>
+                      <span class="text-[10px] text-gray-400 ml-auto">Enter 保存 · Esc 取消</span>
+                    </div>
+                  </div>
+                </template>
+
                 <!-- 查看模式 -->
-                <template x-if="!reportEditMode">
-                  <div @dblclick="startEditField(f)" class="cursor-text">
+                <template x-if="!reportEditMode && editingKey !== f.key">
+                  <div @dblclick="startEditField(f)" class="cursor-text" title="双击编辑此字段">
                     <template x-if="f.r?.status==='conflict'">
                       <div class="space-y-1">
-                        <template x-for="(v,i) in (f.r.values||[])" :key="i">
-                          <div class="flex items-baseline gap-2">
-                            <span class="tag tag-gray text-[10px]" x-text="i===0 ? '已知值' : '调研值'"></span>
-                            <span class="font-medium" x-text="v"></span>
+                        <!-- 非校验态：展示各值 + 快速校验入口 -->
+                        <template x-if="resolvingKey !== f.key">
+                          <div>
+                            <template x-for="(v,i) in (f.r.values||[])" :key="i">
+                              <div class="flex items-baseline gap-2">
+                                <span class="tag tag-gray text-[10px]" x-text="i===0 ? '已知值' : '调研值'"></span>
+                                <span class="font-medium" x-text="v"></span>
+                              </div>
+                            </template>
+                            <button @click.stop="startResolve(f)"
+                                    class="mt-1.5 text-xs px-2 py-1 rounded border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 flex items-center gap-1">
+                              <i class="fas fa-clipboard-check"></i>快速校验
+                            </button>
+                          </div>
+                        </template>
+                        <!-- 校验态：选一个调研值或自定义填写 -->
+                        <template x-if="resolvingKey === f.key">
+                          <div class="space-y-1.5 bg-white border border-amber-300 rounded p-2" @click.stop @dblclick.stop>
+                            <div class="text-[11px] text-gray-500">选择一个值，或在下方自定义填写：</div>
+                            <template x-for="(v,i) in (f.r.values||[])" :key="i">
+                              <button @click="resolveValue = v"
+                                      class="w-full text-left text-xs px-2 py-1.5 rounded border flex items-center gap-2"
+                                      :class="resolveValue === v ? 'border-[#165DFF] bg-blue-50 text-[#165DFF]' : 'border-gray-200 hover:border-[#165DFF]'">
+                                <i class="fas text-[10px]" :class="resolveValue === v ? 'fa-circle-dot' : 'fa-circle'"></i>
+                                <span class="tag tag-gray !text-[10px] !px-1" x-text="i===0 ? '已知' : '调研'"></span>
+                                <span class="font-medium flex-1" x-text="v"></span>
+                              </button>
+                            </template>
+                            <input type="text" x-model="resolveValue" placeholder="自定义填写…"
+                                   class="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:border-[#165DFF] outline-none">
+                            <div class="flex items-center gap-2 pt-0.5">
+                              <button @click="saveResolve(f)" :disabled="resolveSaving"
+                                      class="text-xs px-3 py-1 rounded bg-[#165DFF] text-white hover:bg-blue-600 disabled:opacity-60 flex items-center gap-1">
+                                <i class="fas" :class="resolveSaving ? 'fa-spinner fa-spin' : 'fa-check'"></i>保存
+                              </button>
+                              <button @click="cancelResolve()" class="text-xs px-2 py-1 text-gray-500 hover:text-gray-700">取消</button>
+                            </div>
                           </div>
                         </template>
                       </div>
@@ -781,8 +868,8 @@
                 </template>
 
                 <div class="text-[11px] text-gray-500 mt-1" x-show="!reportEditMode" x-text="f.r?.reason || ''"></div>
-                <!-- 模型一致性 -->
-                <template x-if="!reportEditMode && f.r?.model_summary">
+                <!-- 模型一致性：仅多模型并行时展示（单模型时 reason 已足够，避免重复）-->
+                <template x-if="!reportEditMode && f.r?.model_summary && (f.r?.raw_results?.length > 1)">
                   <div class="text-[10px] text-gray-400 mt-0.5 border-t border-gray-200 pt-1"
                        :title="'原始模型输出:\n' + (f.r?.raw_results||[]).map(rr => rr.model + ': ' + (rr.value || 'unknown')).join('\n')">
                     <i class="fas fa-microchip mr-1"></i><span x-text="f.r.model_summary"></span>
@@ -843,12 +930,13 @@
                 <option value="none">无认证</option>
               </select></div>
             <div><label class="text-xs text-gray-500">API Key / Token<span x-show="!editingModelId" class="text-red-500">*</span>
-              <span class="text-gray-400 text-[10px]" x-show="editingModelId">留空保持原值</span></label>
+              <span class="text-gray-400 text-[10px]" x-show="editingModelId">已脱敏展示，不修改即保持原值</span></label>
               <div class="relative mt-1">
-                <input :type="showKey ? 'text' : 'password'" x-model="modelForm.api_key"
+                <input :type="(editingModelId && modelForm.api_key === modelForm._api_key_mask) ? 'text' : (showKey ? 'text' : 'password')" x-model="modelForm.api_key"
                        class="w-full pr-16 border rounded px-3 py-2 text-sm font-mono"
                        :placeholder="editingModelId ? '保持原值（留空不修改）' : '粘贴 API Key'"
-                       autocomplete="off" spellcheck="false">
+                       autocomplete="off" spellcheck="false"
+                       @focus="if(editingModelId && modelForm.api_key === modelForm._api_key_mask){ modelForm.api_key=''; }">
                 <button type="button" @click="showKey=!showKey"
                         class="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-[#165DFF] px-1.5 py-0.5">
                   <i class="fas" :class="showKey ? 'fa-eye-slash' : 'fa-eye'"></i>
@@ -904,6 +992,31 @@
         <div>
           <label class="text-xs text-gray-500">来源说明（去哪查，会喂给大模型）</label>
           <textarea x-model="fieldForm.source_note" rows="2" class="mt-1 w-full border rounded px-3 py-2 text-sm" placeholder="如：企查查注册地址 / 工商登记地 / 官网备案"></textarea>
+        </div>
+        <div>
+          <div class="flex items-center justify-between">
+            <label class="text-xs text-gray-500">数据源网址（调研时优先访问；最多 20 条）</label>
+            <button type="button" @click="addReferenceUrl()" class="text-xs text-[#165DFF] hover:underline">
+              <i class="fas fa-plus mr-0.5"></i>添加一条
+            </button>
+          </div>
+          <div class="mt-1 space-y-1.5">
+            <template x-for="(r, i) in (fieldForm.reference_urls || [])" :key="i">
+              <div class="flex items-center gap-2">
+                <input type="text" x-model="r.name" placeholder="名称（如：企查查）"
+                       class="w-32 border rounded px-2 py-1.5 text-xs focus:border-[#165DFF] outline-none">
+                <input type="text" x-model="r.url" placeholder="https://..."
+                       class="flex-1 border rounded px-2 py-1.5 text-xs focus:border-[#165DFF] outline-none">
+                <button type="button" @click="removeReferenceUrl(i)"
+                        class="text-gray-400 hover:text-red-500 px-1" title="删除">
+                  <i class="fas fa-times"></i>
+                </button>
+              </div>
+            </template>
+            <div x-show="!(fieldForm.reference_urls || []).length" class="text-[11px] text-gray-400 italic">
+              暂无；调研时会按全网搜索。建议至少配 1-2 条权威站点（如企查查、官网、LinkedIn Sales Navigator 等）。
+            </div>
+          </div>
         </div>
         <div>
           <label class="text-xs text-gray-500">分组</label>
@@ -980,6 +1093,7 @@ function app() {
     // 模型管理（嵌入 SPA 的「模型管理」tab）
     models: [],
     modelTesting: {},
+    modelTestResult: {},   // { [id]: { state:'testing'|'ok'|'err', text } } 行内即时反馈
     modelModalOpen: false,
     modelSaving: false,
     showKey: false,
@@ -992,7 +1106,7 @@ function app() {
     fieldImporting: false,
     _fieldFromWorkspace: false,
     fieldMgmtCollapsed: {},   // 字段管理列表：分组折叠状态
-    fieldForm: { key: '', label: '', hint: '', source_note: '', group: 'meta', numeric: false, enabled: true, customGroup: '' },
+    fieldForm: { key: '', label: '', hint: '', source_note: '', reference_urls: [], group: 'meta', numeric: false, enabled: true, customGroup: '' },
     fieldGroupError: '',
     job: null, _pollTimer: null,
     report: null, reportOpen: false,
@@ -1000,8 +1114,15 @@ function app() {
     reportEditMode: false,
     reportDraft: {},
     reportSaving: false,
+    editingKey: null,   // 双击单字段行内编辑：当前正在编辑的字段 key
+    editDraft: '',      // 单字段编辑的草稿值
+    editSaving: false,
     diffMap: {},        // { fieldKey: { old } } 仅含变化项
     diffActive: false,
+    resolvingKey: null, // 正在快速校验的冲突字段 key
+    resolveValue: '',   // 快速校验选定/填写的值
+    resolveSaving: false,
+    reresearchingKey: null, // 正在单字段重调研的 field key
     toasts: [],
     _toastId: 0,
 
@@ -1039,7 +1160,7 @@ function app() {
       } catch (e) { this.notify('加载字段失败: ' + e, 'err'); }
     },
     openFieldNew(fromWorkspace = false) {
-      this.fieldForm = { key: '', label: '', hint: '', source_note: '', group: 'meta', numeric: false, enabled: true, customGroup: '' };
+      this.fieldForm = { key: '', label: '', hint: '', source_note: '', reference_urls: [], group: 'meta', numeric: false, enabled: true, customGroup: '' };
       this.fieldGroupError = '';
       this._fieldFromWorkspace = fromWorkspace;   // 工作台新增时：保存后自动选中
       this.fieldModalOpen = true;
@@ -1049,9 +1170,19 @@ function app() {
       this.fieldGroupError = '';
       this.fieldForm = {
         key: f.key, label: f.label || '', hint: f.hint || '', source_note: f.source_note || '',
+        reference_urls: Array.isArray(f.reference_urls) ? JSON.parse(JSON.stringify(f.reference_urls)) : [],
         group: f.group || 'custom', numeric: !!f.numeric, enabled: f.enabled !== false, customGroup: '',
       };
       this.fieldModalOpen = true;
+    },
+    // 数据源网址行操作
+    addReferenceUrl() {
+      if (!Array.isArray(this.fieldForm.reference_urls)) this.fieldForm.reference_urls = [];
+      if (this.fieldForm.reference_urls.length >= 20) { this.notify('最多 20 条网址', 'err'); return; }
+      this.fieldForm.reference_urls.push({ name: '', url: '' });
+    },
+    removeReferenceUrl(i) {
+      this.fieldForm.reference_urls.splice(i, 1);
     },
     // 分组下拉选项：标准分组（不含通用"自定义"）+ 已存在的命名自定义分组
     get groupOptions() {
@@ -1084,6 +1215,7 @@ function app() {
         const url = isEdit ? '/api/field-defs/' + this.fieldForm.key : '/api/field-defs';
         const payload = {
           label: this.fieldForm.label, hint: this.fieldForm.hint, source_note: this.fieldForm.source_note,
+          reference_urls: (this.fieldForm.reference_urls || []).filter(r => (r.name || '').trim() || (r.url || '').trim()),
           group, numeric: this.fieldForm.numeric, enabled: this.fieldForm.enabled,
         };
         const r = await fetch(url, {
@@ -1161,7 +1293,9 @@ function app() {
       this.modelForm = {
         name: m.name || '', provider: m.provider || 'custom', identifier: m.identifier || '',
         version: m.version || '', description: m.description || '',
-        api_url: m.api_url || '', auth_type: m.auth_type || 'bearer', api_key: '',
+        api_url: m.api_url || '', auth_type: m.auth_type || 'bearer',
+        api_key: m.api_key_mask || '',   // 默认展示脱敏 key；未修改则保存时跳过
+        _api_key_mask: m.api_key_mask || '',
         custom_headers_text: m.custom_headers ? JSON.stringify(m.custom_headers, null, 2) : '',
         custom_headers_error: '',
         timeout: m.timeout || 120, max_retries: m.max_retries || 3, concurrency: m.concurrency || 4,
@@ -1182,7 +1316,11 @@ function app() {
       }
       this.modelSaving = true;
       const body = { ...this.modelForm, custom_headers: headers };
-      delete body.custom_headers_text; delete body.custom_headers_error;
+      delete body.custom_headers_text; delete body.custom_headers_error; delete body._api_key_mask;
+      // 编辑时若 key 仍为脱敏原值（未改动），则不提交 api_key（后端保持原值）
+      if (this.editingModelId && this.modelForm._api_key_mask && this.modelForm.api_key === this.modelForm._api_key_mask) {
+        delete body.api_key;
+      }
       try {
         const url = this.editingModelId ? `/api/models/${this.editingModelId}` : '/api/models';
         const method = this.editingModelId ? 'PUT' : 'POST';
@@ -1219,19 +1357,23 @@ function app() {
       } catch (e) { this.notify(String(e.message), 'err'); }
     },
     async testModel(m) {
-      console.log('[testModel] 开始测试', m?.id, m?.name);
       if (!m || !m.id) { this.notify('参数错误:模型 id 缺失', 'err'); return; }
+      if (this.modelTesting && this.modelTesting[m.id]) return;  // 防重复点击
       this.modelTesting = { ...this.modelTesting, [m.id]: true };
+      this.modelTestResult = { ...this.modelTestResult, [m.id]: { state: 'testing', text: '测试中…' } };
+      this.notify(`正在测试 ${m.name}…`, 'info');   // 即时反馈
       try {
         const r = await fetch(`/api/models/${m.id}/test`, { method: 'POST', credentials: 'same-origin' });
-        console.log('[testModel] HTTP', r.status);
         if (r.status === 401) { location.replace('/login.html'); return; }
         let j; try { j = await r.json(); } catch { j = { ok: false, error: 'HTTP ' + r.status }; }
-        console.log('[testModel] result', j);
-        this.notify(j.ok ? `✓ ${m.name} 通过 (${j.latencyMs}ms)` : `✗ ${m.name}: ${j.error || '失败'}`, j.ok ? 'ok' : 'err');
+        this.modelTestResult = { ...this.modelTestResult, [m.id]: {
+          state: j.ok ? 'ok' : 'err',
+          text: j.ok ? `✓ 通过 ${j.latencyMs}ms` : `✗ ${(j.error || '失败').slice(0, 40)}`,
+        } };
+        this.notify(j.ok ? `✓ ${m.name} 连通正常 (${j.latencyMs}ms)` : `✗ ${m.name} 失败：${j.error || '未知错误'}`, j.ok ? 'ok' : 'err');
         await this.loadModels();
       } catch (e) {
-        console.error('[testModel] error', e);
+        this.modelTestResult = { ...this.modelTestResult, [m.id]: { state: 'err', text: '✗ ' + (e?.message || e) } };
         this.notify('测试失败: ' + (e?.message || e), 'err');
       } finally {
         this.modelTesting = { ...this.modelTesting, [m.id]: false };
@@ -1452,6 +1594,7 @@ function app() {
 
     async openReport(id) {
       this.reportEditMode = false; this.reportDraft = {}; this.diffMap = {}; this.diffActive = false;
+      this.resolvingKey = null; this.resolveValue = '';
       this.report = await fetch(`/api/customers/${id}/report`).then(r => r.json());
       this.reportOpen = true;
     },
@@ -1481,10 +1624,60 @@ function app() {
       this.diffActive = false; this.diffMap = {};
     },
     startEditField(f) {
-      if (this.reportEditMode) return;
-      this.enterReportEdit();
+      if (this.reportEditMode) return;       // 批量编辑态下不触发单字段编辑
+      this.editingKey = f.key;
+      // 取当前值作为初始草稿（冲突字段取第一个值）
+      const r = f.r || {};
+      this.editDraft = r.value || (r.values && r.values[0]) || '';
+    },
+    cancelFieldEdit() { this.editingKey = null; this.editDraft = ''; },
+    async saveFieldEdit(f) {
+      const id = this.report?.customer?.id;
+      if (!id || !this.editingKey) return;
+      const val = (this.editDraft || '').trim();
+      this.editSaving = true;
+      try {
+        const r = await fetch(`/api/customers/${id}/manual`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { [f.key]: val } }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.report = j.report;
+        this.editingKey = null;
+        this.editDraft = '';
+        this.notify(`「${f.label}」已更新`, 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.editSaving = false; }
     },
     cancelReportEdit() { this.reportEditMode = false; this.reportDraft = {}; },
+
+    // 冲突字段快速校验：选一个调研值或自定义填写，保存为人工值
+    startResolve(f) {
+      this.resolvingKey = f.key;
+      this.resolveValue = (f.r?.values && f.r.values[0]) || f.r?.value || '';
+    },
+    cancelResolve() { this.resolvingKey = null; this.resolveValue = ''; },
+    async saveResolve(f) {
+      const id = this.report?.customer?.id;
+      const val = (this.resolveValue || '').trim();
+      if (!id) return;
+      if (!val) { this.notify('请选择或填写一个值', 'err'); return; }
+      this.resolveSaving = true;
+      try {
+        const r = await fetch(`/api/customers/${id}/manual`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fields: { [f.key]: val } }),
+        });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error || '保存失败');
+        this.report = j.report;
+        this.resolvingKey = null;
+        this.resolveValue = '';
+        this.notify('已校验，该字段已更新', 'ok');
+      } catch (e) { this.notify(String(e.message || e), 'err'); }
+      finally { this.resolveSaving = false; }
+    },
 
     // 保存人工补充；updateAfter=true 时再对空值/unknown 字段重新调研
     async saveReportManual(updateAfter) {
@@ -1526,6 +1719,41 @@ function app() {
         }
       } catch (e) { this.notify(String(e.message || e), 'err'); }
       finally { this.reportSaving = false; }
+    },
+
+    // 单字段重新调研：按该字段配置的数据源重新查，仅刷新当前报告，不跳页
+    async reresearchField(fieldKey) {
+      const id = this.report?.customer?.id;
+      if (!id || !fieldKey) return;
+      if (this.reresearchingKey) { this.notify('已有字段正在重调研，请稍候', 'err'); return; }
+      this.reresearchingKey = fieldKey;
+      try {
+        const rr = await fetch('/api/research', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ customer_ids: [id], fields: [fieldKey], models: this.selectedModels }),
+        });
+        const jj = await rr.json();
+        if (!rr.ok || !jj.job) throw new Error(jj.error || '发起调研失败');
+        // 轮询该 job 完成后只刷新当前报告
+        const jobId = jj.job.id;
+        await new Promise((resolve) => {
+          const timer = setInterval(async () => {
+            try {
+              const jr = await fetch('/api/jobs/' + jobId).then(r => r.json());
+              if (jr.status === 'done' || jr.status === 'failed') {
+                clearInterval(timer); resolve();
+              }
+            } catch { clearInterval(timer); resolve(); }
+          }, 1500);
+        });
+        // 重新拉取报告，刷新该字段
+        this.report = await fetch(`/api/customers/${id}/report`).then(r => r.json());
+        this.notify(`「${this.fields.find(f=>f.key===fieldKey)?.label || fieldKey}」已重新调研`, 'ok');
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      } finally {
+        this.reresearchingKey = null;
+      }
     },
 
     // 版本对比：当前报告 vs 最近一个快照，逐字段标差异
@@ -1575,7 +1803,7 @@ function app() {
         const r = this.report.fields?.[f.key];
         const g = f.group || 'meta';
         if (!map[g]) map[g] = [];
-        map[g].push({ key: f.key, label: f.label, r });
+        map[g].push({ key: f.key, label: f.label, r, hint: f.hint, source_note: f.source_note, reference_urls: f.reference_urls || [] });
       }
       const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
       return order.filter(g => map[g]).map(g => [g, map[g]]);

@@ -184,6 +184,15 @@ const FIELD_DEF_COLUMNS = [
   { header: '启用(是/否)', key: 'enabled' },
 ];
 
+/** 分组 key ↔ 中文名（导出用中文，导入转回 key；自定义中文分组名原样保留） */
+const GROUP_LABELS = {
+  basic: '基本信息', app: 'APP', product: '产品', biz: '业务规模', data: '数据',
+  collection: '催收', people: '人员', goal: '目标', meta: '其他', custom: '自定义',
+};
+const GROUP_KEYS = Object.fromEntries(Object.entries(GROUP_LABELS).map(([k, v]) => [v, k]));
+const groupToLabel = (g) => GROUP_LABELS[g] || g || '自定义';
+const labelToGroup = (s) => GROUP_KEYS[String(s).trim()] || String(s).trim();
+
 /** 导出字段定义为 xlsx（供批量编辑后再导入） */
 export async function exportFieldDefs(filePath, defs) {
   const wb = new ExcelJS.Workbook();
@@ -198,7 +207,7 @@ export async function exportFieldDefs(filePath, defs) {
   for (const f of defs) {
     ws.addRow([
       f.label || '', f.hint || '', f.source_note || '',
-      f.group || 'custom', yn(f.enabled !== false),
+      groupToLabel(f.group), yn(f.enabled !== false),
     ]);
   }
   FIELD_DEF_COLUMNS.forEach((c, i) => {
@@ -232,7 +241,7 @@ export async function parseFieldDefs(filePath) {
       label,
       hint: cellText(row.getCell(2)),
       source_note: cellText(row.getCell(3)),
-      group: cellText(row.getCell(4)) || 'custom',
+      group: labelToGroup(cellText(row.getCell(4))) || 'custom',
       enabled: cellText(row.getCell(5)) === '' ? true : isYes(cellText(row.getCell(5))),
     });
   }

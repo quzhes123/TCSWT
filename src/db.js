@@ -17,7 +17,8 @@ const DEFAULT = {
   results: [],     // { id, job_id, customer_id, field, model?, status, value?, values?, known_value?, reason?, confidence?, is_merged?, raw_result_ids?, model_summary?, created_at }
   sources: [],     // { id, result_id, url, title, evidence }
   models: [],      // ★ 模型配置（key 加密存储）
-  field_defs: [],  // ★ 字段定义（中文名/解释/来源说明/分组/启停/顺序），由 field-spec 首次迁移
+  field_defs: [],  // ★ 字段定义（中文名/解释/来源说明/数据源网址/分组/启停/顺序），由 field-spec 首次迁移
+                   //   reference_urls: [{name, url}] —— 结构化数据源网址列表（指导调研优先访问的站点）
   report_versions: [], // ★ 报告版本快照 { id, customer_id, label, fields, created_at }
 };
 
@@ -276,13 +277,25 @@ function maskHeaders(headers) {
   }
   return out;
 }
+/** 把明文 key 脱敏：保留首4尾4，中间用 • 代替（短 key 全部打码）。 */
+function maskKey(plain) {
+  const s = String(plain || '');
+  if (!s) return '';
+  if (s.length <= 8) return '•'.repeat(s.length);
+  return s.slice(0, 4) + '••••••' + s.slice(-4);
+}
 function publicModel(m) {
   if (!m) return m;
   const { api_key_encrypted, custom_headers, ...rest } = m;
+  let api_key_mask = '';
+  if (api_key_encrypted) {
+    try { api_key_mask = maskKey(decrypt(api_key_encrypted)); } catch { api_key_mask = '••••••••'; }
+  }
   return {
     ...rest,
     custom_headers: maskHeaders(custom_headers),
     has_key: !!api_key_encrypted || hasSensitiveHeader(custom_headers),
+    api_key_mask,   // 脱敏展示用（如 sk-0••••••47ac），不可用于实际请求
   };
 }
 function hasSensitiveHeader(headers) {
@@ -350,8 +363,8 @@ export function updateModel(id, patch) {
     // 用户可能删了某个 header(前端不传该 key) → 我们这里保守保留旧值,如需删除让 UI 显式发 null
     m.custom_headers = merged;
   }
-  // api_key:有值才更新(空字符串视为不修改),前端用 '' 表示"保持原值"
-  if (typeof patch.api_key === 'string' && patch.api_key.length > 0 && patch.api_key !== '••••••••') {
+  // api_key:有值才更新(空字符串视为不修改)。任何含脱敏符号 • 的值都视为"未修改的脱敏展示值"，不覆盖。
+  if (typeof patch.api_key === 'string' && patch.api_key.length > 0 && !patch.api_key.includes('•')) {
     m.api_key_encrypted = encrypt(patch.api_key);
   }
   m.updated_at = Date.now();
@@ -448,6 +461,7 @@ export function createFieldDef(input) {
     group: sanitizeGroup(input.group),
     hint: String(input.hint || '').trim(),
     source_note: String(input.source_note || '').trim(),
+    reference_urls: sanitizeReferenceUrls(input.reference_urls),
     numeric: !!input.numeric,
     no_research: !!input.no_research,
     enabled: input.enabled !== false,
@@ -467,10 +481,28 @@ export function updateFieldDef(key, patch) {
   for (const k of ['label','group','hint','source_note','numeric','no_research','enabled','order']) {
     if (k in patch) f[k] = patch[k];
   }
+  if ('reference_urls' in patch) f.reference_urls = sanitizeReferenceUrls(patch.reference_urls);
   if ('group' in patch) f.group = sanitizeGroup(patch.group);
   f.updated_at = Date.now();
   persist();
   return f;
+}
+
+/** 规范化 reference_urls：去除无效项、修剪空白、上限 20 条。
+ *  接受 [{name, url}] 或字符串数组（自动拆为 {name:'', url}）。 */
+function sanitizeReferenceUrls(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map(it => {
+      if (!it) return null;
+      if (typeof it === 'string') return { name: '', url: it.trim() };
+      const name = String(it.name || '').trim();
+      const url = String(it.url || '').trim();
+      if (!name && !url) return null;
+      return { name, url };
+    })
+    .filter(Boolean)
+    .slice(0, 20);
 }
 export function deleteFieldDef(key) {
   const s = load();
@@ -496,6 +528,8 @@ export function importFieldDefs(rows) {
     // numeric / no_research 不在导入模板中：仅当行里显式提供才写，避免覆盖内置字段已有设置
     if ('numeric' in row) patch.numeric = !!row.numeric;
     if ('no_research' in row) patch.no_research = !!row.no_research;
+    // reference_urls: 导入模板若提供则覆盖；未提供则保留原值
+    if ('reference_urls' in row) patch.reference_urls = row.reference_urls;
     // 无 key 列：按 key（兼容旧模板）或中文名称匹配——同名则更新，否则新建
     const existing = (row.key && getFieldDef(row.key))
       || all.find(f => f.label === row.label);
@@ -512,7 +546,8 @@ export function importFieldDefs(rows) {
 
 /** 启动时自动迁移：仅当 db 中无任何 field_def 时，把 field-spec.js 的 FIELDS 灌入。
  *  把 sources.primary/fallback 拼成 source_note 文本，NUMERIC_LIKE_FIELDS→numeric，
- *  NO_RESEARCH_FIELDS→no_research，全部标 builtin:true（可改可停，删除给二次确认）。
+ *  NO_RESEARCH_FIELDS→no_research，reference_urls 结构化数组直接保留，
+ *  全部标 builtin:true（可改可停，删除给二次确认）。
  */
 export function autoMigrateFieldDefs() {
   const s = load();
@@ -527,6 +562,7 @@ export function autoMigrateFieldDefs() {
       group: f.group || 'meta',
       hint: f.hint || '',
       source_note: parts.join('；'),
+      reference_urls: sanitizeReferenceUrls(f.reference_urls),
       numeric: NUMERIC_LIKE_FIELDS.has(f.key),
       no_research: NO_RESEARCH_FIELDS.has(f.key),
       enabled: true,
@@ -539,6 +575,29 @@ export function autoMigrateFieldDefs() {
   persist();
   console.log(`[autoMigrate] 已灌入 ${s.field_defs.length} 个内置字段定义到 field_defs`);
   return s.field_defs.length;
+}
+
+/** 二次迁移：给老 db 中已有的 field_defs 补 reference_urls 字段。
+ *  - 缺该属性的全部补默认空数组 []
+ *  - 若是内置字段（builtin:true）且 field-spec 中定义了 reference_urls，则用 field-spec 的回填
+ *  幂等：只动确实需要补的记录。
+ */
+export function ensureReferenceUrlsField() {
+  const s = load();
+  let touched = 0;
+  const specByKey = Object.fromEntries(FIELDS.map(f => [f.key, f]));
+  for (const fd of s.field_defs) {
+    if (Array.isArray(fd.reference_urls)) continue;
+    const fromSpec = fd.builtin ? specByKey[fd.key]?.reference_urls : null;
+    fd.reference_urls = sanitizeReferenceUrls(fromSpec);
+    fd.updated_at = Date.now();
+    touched++;
+  }
+  if (touched) {
+    persist();
+    console.log(`[ensureReferenceUrlsField] 已为 ${touched} 个字段补默认 reference_urls`);
+  }
+  return touched;
 }
 
 /** 启动时自动迁移：仅当 db 中无任何 model 且 .env 配置了 ANTHROPIC_* 时，建一条默认记录。

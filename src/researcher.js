@@ -5,9 +5,17 @@
 import { detectConflict } from './excel-io.js';
 import { getFieldByKey } from './fields.js';
 import { webSearch, fetchPage, SEARCH_ENABLED } from './serp.js';
+import { lookupAppMetrics, SURFUN_ENABLED } from './surfun.js';
 
-const MAX_LOOPS = 6;             // 单字段最多 agent 步数（防失控；最后一轮会强制 record_finding）
-const MAX_FETCH_PER_FIELD = 4;   // 单字段最多抓取页数
+// 可由星盘直接取数的 APP 字段 → 取 lookupAppMetrics 返回的哪个属性
+const SURFUN_FIELD_MAP = {
+  app_total_dl: 'installs',   // APP累计下载
+  app_ranking:  'rank',       // 排名
+  app_operator: 'developer',  // APP运营主体
+};
+
+const MAX_LOOPS = 10;            // 单字段最多 agent 步数（防失控；最后一轮会强制 record_finding。配合 8 次 fetch 上限）
+const MAX_FETCH_PER_FIELD = 8;   // 单字段最多抓取页数（召回差时给模型更多尝试机会）
 const DEBUG = process.env.RESEARCH_DEBUG === '1';
 
 // 客户端工具：web_search + fetch_page；最终落点：record_finding
@@ -88,7 +96,29 @@ function fieldGuidance(spec) {
   if (spec.sources?.primary?.length) lines.push(`优先来源：${spec.sources.primary.join('、')}`);
   if (spec.sources?.fallback?.length) lines.push(`备选来源：${spec.sources.fallback.join('、')}`);
   if (spec.hint) lines.push(`字段解释：${spec.hint}`);
+  // 结构化"数据源网址"——强引导：让模型优先访问这些站点
+  const refs = Array.isArray(spec.reference_urls) ? spec.reference_urls.filter(r => r && r.url) : [];
+  if (refs.length) {
+    lines.push('**优先访问以下数据源网址**：');
+    for (const r of refs) {
+      lines.push(`- ${r.name || r.url}: ${r.url}`);
+    }
+    lines.push('说明：请优先用 web_search 检索包含上述域名的页面（系统会自动用 includeDomains 限定），或用 fetch_page 直接抓取这些站点。');
+  }
   return lines.join('\n');
+}
+
+/** 提取 spec.reference_urls 中的域名列表，给 Tavily includeDomains 用 */
+function extractIncludeDomains(spec) {
+  const refs = Array.isArray(spec?.reference_urls) ? spec.reference_urls.filter(r => r && r.url) : [];
+  const domains = [];
+  for (const r of refs) {
+    try {
+      const u = new URL(r.url);
+      if (u.hostname) domains.push(u.hostname.replace(/^www\./, ''));
+    } catch { /* 忽略无效 URL */ }
+  }
+  return [...new Set(domains)];
 }
 
 function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
@@ -144,6 +174,15 @@ function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
     `3) 从正文中提取值与佐证句，调 record_finding(status=filled, value, reason, confidence, sources)`,
     `4) 若多源不一致 → status=conflict, value 用 ;分号串联，reason 解释差异`,
     `5) 完全查不到 → status=unknown`,
+    ``,
+    `## 搜索技巧（召回差时务必尝试，不要轻易 unknown）`,
+    `- 中文搜索返回无关结果时，**改用英文公司名 + 英文关键词**重搜（如 "${customer.customer_name} management team / organizational structure / annual report"）`,
+    `- 若公司疑似上市（中概股/港股/美股），**直接 fetch 年报与 IR 页**最权威：`,
+    `  · 美股 → SEC EDGAR (sec.gov/cgi-bin/browse-edgar) 的 20-F/10-K 年报"管理层/治理"章节`,
+    `  · 港股 → 港交所披露易 (hkexnews.hk) 的年报`,
+    `  · 官网投资者关系页 (ir.<公司域名>.com) 的"关于我们/团队/治理"`,
+    `- 企查查/天眼查/LinkedIn 等常被反爬或区域屏蔽，搜不到时改走上面的年报/官网/媒体公开页`,
+    `- 你有最多 ${MAX_FETCH_PER_FIELD} 次 fetch_page 机会，请优先把次数用在年报/官网/权威媒体上`,
     companyNameHint,
     ``,
     guide ? `## 调研指引\n${guide}` : '',
@@ -155,7 +194,10 @@ function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
 async function execClientTool(toolUse, state) {
   const { name, input, id } = toolUse;
   if (name === 'web_search') {
-    const r = await webSearch(input?.query || '');
+    // 第一次搜索带 includeDomains（约束在字段配置的官方站点）；后续若无结果再放开全网
+    const useDomains = state.includeDomains && state.includeDomains.length && state.searchCount === 0;
+    const opts = useDomains ? { includeDomains: state.includeDomains } : {};
+    const r = await webSearch(input?.query || '', opts);
     state.searchCount += 1;
     if (!r.ok) {
       // 给模型一个明确的终结信号：禁用/失败时直接调 record_finding(unknown)，不要再换关键词试
@@ -204,6 +246,37 @@ export async function researchField({ customer, fieldKey, spec: customSpec, mode
   if (spec.no_research) {
     return { result: { status: 'known', value: customer.raw_known?.[fieldKey] || '' }, sources: [] };
   }
+
+  // ── 星盘短路：APP 类字段优先用信贷监控星盘直取，命中则跳过 LLM 搜索 ──
+  if (SURFUN_ENABLED && SURFUN_FIELD_MAP[fieldKey]) {
+    const appName = customer.raw_known?.app_name || '';
+    if (appName) {
+      try {
+        const sr = await lookupAppMetrics(appName, customer.raw_known?.region || '');
+        if (sr.ok && sr.best) {
+          const prop = SURFUN_FIELD_MAP[fieldKey];
+          let val = sr.best[prop];
+          if (val !== undefined && val !== null && String(val).trim() !== '') {
+            // 数值型（下载量/排名）加千分位友好展示
+            if ((fieldKey === 'app_total_dl' || fieldKey === 'app_ranking') && /^\d+$/.test(String(val))) {
+              val = Number(val).toLocaleString('en-US');
+            }
+            return {
+              result: {
+                status: 'filled', value: String(val),
+                reason: `信贷监控星盘实时数据（APP：${sr.best.app_name}，区域：${sr.region}，平台：${sr.platform === 1 ? 'Google Play' : 'App Store'}，更新于 ${sr.best.updated || '—'}）`,
+                confidence: 0.95, known_value: customer.raw_known?.[fieldKey] || null,
+                model: 'surfun', _stat: { source: 'surfun' },
+              },
+              sources: [{ url: sr.sourceUrl, title: '信贷监控星盘 · 上架监控', evidence: `${sr.best.app_name}：下载 ${sr.best.installs} / 评分 ${sr.best.score} / 排名 ${sr.best.rank}` }],
+            };
+          }
+        }
+        // 星盘没查到 → 不阻断，继续走下面的 LLM 通用调研
+      } catch { /* 星盘异常则降级到 LLM */ }
+    }
+  }
+
   if (!driver) throw new Error('researchField 需要 driver 实例');
   const modelTag = driver.id;
 
@@ -212,7 +285,7 @@ export async function researchField({ customer, fieldKey, spec: customSpec, mode
 
   const system = buildSystemPrompt();
   const messages = [{ role: 'user', content: buildInitialUser({ customer, fieldKey, knownValue, mode: actualMode, spec }) }];
-  const state = { searchCount: 0, fetchCount: 0 };
+  const state = { searchCount: 0, fetchCount: 0, includeDomains: extractIncludeDomains(spec) };
 
   let recordFinding = null;
   const FORCE_HINT = '请基于已收集的信息立即调用 record_finding 给出最终结论。如果信息不足以确定值，使用 status=unknown，并在 reason 里说明原因。不要再调用 web_search/fetch_page。';

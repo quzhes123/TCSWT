@@ -436,7 +436,7 @@ app.post('/api/models/:id/test', async (req, reply) => {
 // ============ API: 查询字段管理 ============
 function pickFieldInput(body) {
   const out = {};
-  ['label','group','hint','source_note','numeric','no_research','enabled','order']
+  ['label','group','hint','source_note','reference_urls','numeric','no_research','enabled','order']
     .forEach(k => { if (body && k in body) out[k] = body[k]; });
   return out;
 }
@@ -506,6 +506,7 @@ app.post('/api/field-defs/:key/toggle', async (req, reply) => {
 try {
   db.autoMigrateModels();      // 首次启动从 .env 迁移 Anthropic 配置
   db.autoMigrateFieldDefs();   // 首次启动把内置 32 字段灌入 field_defs
+  db.ensureReferenceUrlsField(); // 老 db 补 reference_urls（缺则空数组、内置字段回填 field-spec）
   reloadRegistry();         // 加载已启用的模型驱动
   await app.listen({ port: PORT, host: '0.0.0.0' });
   console.log(`\n  ✅ 商务通调研系统已启动：http://localhost:${PORT}`);
