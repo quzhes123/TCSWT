@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test tests/excel.test.js tests/serp.test.js"
+    "test": "node --test tests/excel.test.js tests/serp.test.js tests/merger.test.js tests/reference-urls.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.1",

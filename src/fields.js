@@ -13,6 +13,7 @@ function fallbackDefs() {
       f.sources?.primary?.length ? '优先来源：' + f.sources.primary.join('、') : '',
       f.sources?.fallback?.length ? '备选来源：' + f.sources.fallback.join('、') : '',
     ].filter(Boolean).join('；'),
+    reference_urls: Array.isArray(f.reference_urls) ? f.reference_urls : [],
     numeric: NUMERIC_LIKE_FIELDS.has(f.key),
     no_research: NO_RESEARCH_FIELDS.has(f.key),
     enabled: true, builtin: true, order: i,

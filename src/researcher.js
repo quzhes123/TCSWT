@@ -88,7 +88,29 @@ function fieldGuidance(spec) {
   if (spec.sources?.primary?.length) lines.push(`优先来源：${spec.sources.primary.join('、')}`);
   if (spec.sources?.fallback?.length) lines.push(`备选来源：${spec.sources.fallback.join('、')}`);
   if (spec.hint) lines.push(`字段解释：${spec.hint}`);
+  // 结构化"数据源网址"——强引导：让模型优先访问这些站点
+  const refs = Array.isArray(spec.reference_urls) ? spec.reference_urls.filter(r => r && r.url) : [];
+  if (refs.length) {
+    lines.push('**优先访问以下数据源网址**：');
+    for (const r of refs) {
+      lines.push(`- ${r.name || r.url}: ${r.url}`);
+    }
+    lines.push('说明：请优先用 web_search 检索包含上述域名的页面（系统会自动用 includeDomains 限定），或用 fetch_page 直接抓取这些站点。');
+  }
   return lines.join('\n');
+}
+
+/** 提取 spec.reference_urls 中的域名列表，给 Tavily includeDomains 用 */
+function extractIncludeDomains(spec) {
+  const refs = Array.isArray(spec?.reference_urls) ? spec.reference_urls.filter(r => r && r.url) : [];
+  const domains = [];
+  for (const r of refs) {
+    try {
+      const u = new URL(r.url);
+      if (u.hostname) domains.push(u.hostname.replace(/^www\./, ''));
+    } catch { /* 忽略无效 URL */ }
+  }
+  return [...new Set(domains)];
 }
 
 function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
@@ -155,7 +177,10 @@ function buildInitialUser({ customer, fieldKey, knownValue, mode, spec }) {
 async function execClientTool(toolUse, state) {
   const { name, input, id } = toolUse;
   if (name === 'web_search') {
-    const r = await webSearch(input?.query || '');
+    // 第一次搜索带 includeDomains（约束在字段配置的官方站点）；后续若无结果再放开全网
+    const useDomains = state.includeDomains && state.includeDomains.length && state.searchCount === 0;
+    const opts = useDomains ? { includeDomains: state.includeDomains } : {};
+    const r = await webSearch(input?.query || '', opts);
     state.searchCount += 1;
     if (!r.ok) {
       // 给模型一个明确的终结信号：禁用/失败时直接调 record_finding(unknown)，不要再换关键词试
@@ -212,7 +237,7 @@ export async function researchField({ customer, fieldKey, spec: customSpec, mode
 
   const system = buildSystemPrompt();
   const messages = [{ role: 'user', content: buildInitialUser({ customer, fieldKey, knownValue, mode: actualMode, spec }) }];
-  const state = { searchCount: 0, fetchCount: 0 };
+  const state = { searchCount: 0, fetchCount: 0, includeDomains: extractIncludeDomains(spec) };
 
   let recordFinding = null;
   const FORCE_HINT = '请基于已收集的信息立即调用 record_finding 给出最终结论。如果信息不足以确定值，使用 status=unknown，并在 reason 里说明原因。不要再调用 web_search/fetch_page。';
