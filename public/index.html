@@ -441,14 +441,6 @@
             <input type="text" x-model="kw" @input.debounce.400ms="loadCustomers()" placeholder="按关键词检索（客户名/区域/APP...）"
                    class="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-100 focus:border-[#165DFF]">
           </div>
-          <select x-model="filterLevel" @change="loadCustomers()" class="flex-1 md:flex-none border border-gray-300 rounded-lg px-3 py-2 text-sm">
-            <option value="">全部等级</option>
-            <template x-for="k in Object.keys(stats.byLevel||{})" :key="k"><option x-text="k"></option></template>
-          </select>
-          <select x-model="filterRegion" @change="loadCustomers()" class="flex-1 md:flex-none border border-gray-300 rounded-lg px-3 py-2 text-sm">
-            <option value="">全部区域</option>
-            <template x-for="k in Object.keys(stats.byRegion||{})" :key="k"><option x-text="k"></option></template>
-          </select>
           <button class="text-sm text-gray-500 hover:text-gray-700 md:ml-auto px-2 py-1" @click="loadAll()"><i class="fas fa-rotate mr-1"></i>刷新</button>
         </div>
       </div>
