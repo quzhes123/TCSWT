@@ -1661,6 +1661,32 @@ function app() {
       if (this.reresearchingCustomerId) { this.notify('已有客户正在调研，请稍候', 'err'); return; }
       this.reresearchingCustomerId = c.id;
       try {
+        // 1. 拉取该客户报告，算出需要调研的空缺/unknown 字段
+        const rep = await fetch(`/api/customers/${c.id}/report`, { credentials: 'same-origin' }).then(x => x.json());
+        const missingKeys = [];
+        for (const f of this.fields) {
+          const rf = rep?.fields?.[f.key];
+          const st = rf?.status;
+          // 未填或 unknown 的字段才需重调研（customer_name 等已知不算）
+          if (!rf || st === 'unknown' || st === 'empty' || (!rf.value && !(rf.values && rf.values.length))) {
+            missingKeys.push(f.key);
+          }
+        }
+
+        // 2. 初始化工作台表单（切换到单个调研模式，回填公司名/APP/区域）
+        this.inputMode = 'name';
+        this.companyName = c.customer_name || '';
+        this.appName = (rep?.fields?.app_name?.value) || c.app_name || c.manual_fields?.app_name || c.raw_known?.app_name || '';
+        this.region = (rep?.fields?.region?.value) || c.region || c.raw_known?.region || '';
+        // 模型全选（启用的）
+        this.selectedModels = this.availableModels.map(m => m.id);
+        // 字段勾选：只勾选需要查的空缺字段（若全部已填则保留 customer_name 兵底）
+        this.selectedFields = missingKeys.length ? missingKeys : ['customer_name'];
+
+        // 3. 切换到工作台
+        this.tab = 'workspace';
+
+        // 4. 发起调研（只补空缺字段）
         const r = await fetch('/api/research', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1670,12 +1696,11 @@ function app() {
         if (r.status === 401) { location.replace('/login.html'); return; }
         const data = await r.json();
         if (!r.ok) throw new Error(data.error || '调研任务创建失败');
-        this.notify(`「${c.customer_name}」重调研任务已启动`, 'ok');
-        // 切换到工作台并轮询任务进度
+        this.notify(`「${c.customer_name}」重调研任务已启动（${missingKeys.length} 个空缺字段）`, 'ok');
+        // 轮询任务进度
         if (data.job) {
           this.job = data.job;
           this.lastReportCustomerId = c.id;
-          this.tab = 'workspace';
           this.pollJob();
         }
       } catch (e) {
