@@ -18,7 +18,7 @@ const MAX_RESULTS = 6;
 const MAX_SNIPPET = 280;
 const MAX_PAGE_CHARS = 6000;
 
-// Tavily 用量超限（432）/限流（429）后，进程级粘滞降级到公共搜索，
+// Tavily 用量超限（432）/限流（429）后，进程级粘滞降级到 SerpAPI（如果配置了）或公共搜索，
 // 避免后续每个字段都先撞一次 432 再降级（省时间、止损）。
 let tavilyExhausted = false;
 
@@ -38,17 +38,29 @@ export async function webSearch(query, opts = {}) {
   if (!SEARCH_ENABLED) {
     return { ok: false, reason: '未配置搜索 API（请在 .env 设置 TAVILY_API_KEY 或 SERPAPI_API_KEY）', query, results: [] };
   }
-  // 已知 Tavily 超限：直接走公共搜索，不再浪费一次 432 请求
+  // 已知 Tavily 超限：优先尝试 SerpAPI（如有 key），否则走公共搜索
   if (PROVIDER === 'tavily' && tavilyExhausted) {
+    if (SERPAPI_KEY) {
+      const serp = await serpapiSearch(query, opts);
+      if (serp.ok) return serp;
+      // SerpAPI 也失败 → 降级公共搜索
+    }
     return publicSearch(query, opts);
   }
   if (PROVIDER === 'tavily') {
     const r = await tavilySearch(query, opts);
-    // 432/429 用量超限 → 本次即降级公共搜索，并标记后续都走公共搜索
+    // 432/429 用量超限 → 优先尝试 SerpAPI（如有 key），否则走公共搜索
     if (!r.ok && r.quotaExceeded) {
       tavilyExhausted = true;
+      if (SERPAPI_KEY) {
+        const serp = await serpapiSearch(query, opts);
+        if (serp.ok) {
+          serp.degraded = 'tavily_quota_exceeded_fallback_serpapi';
+          return serp;
+        }
+      }
       const pub = await publicSearch(query, opts);
-      if (pub.ok) pub.degraded = 'tavily_quota_exceeded';
+      if (pub.ok) pub.degraded = 'tavily_quota_exceeded_fallback_public';
       return pub;
     }
     return r;
