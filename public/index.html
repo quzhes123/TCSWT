@@ -408,14 +408,6 @@
           <div class="text-2xl font-bold mt-1" x-text="stats.total||0"></div>
         </div>
         <div class="card p-4">
-          <div class="text-xs text-gray-500">按客户等级</div>
-          <div class="mt-1.5 space-y-1 text-xs">
-            <template x-for="[k,v] in Object.entries(stats.byLevel||{})" :key="k">
-              <div class="flex justify-between"><span x-text="k"></span><span class="font-semibold" x-text="v"></span></div>
-            </template>
-          </div>
-        </div>
-        <div class="card p-4">
           <div class="text-xs text-gray-500">按展业区域</div>
           <div class="mt-1.5 flex flex-wrap gap-1">
             <template x-for="[k,v] in Object.entries(stats.byRegion||{})" :key="k">

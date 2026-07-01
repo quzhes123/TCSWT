@@ -306,18 +306,17 @@ export function resolveFieldValue(customer_id_or_obj, fieldKey) {
 // ========== 看板统计 ==========
 export function computeStats() {
   const customers = load().customers;
-  const byLevel = {}, byRegion = {}, byBizLine = {};
+  const byRegion = {}, byBizLine = {};
   for (const c of customers) {
-    const lvl = c.customer_level || '未分级';
-    const reg = c.region || '未知';
-    const biz = c.business_line || c.product_type || '未分类';
-    byLevel[lvl] = (byLevel[lvl] || 0) + 1;
+    // 使用 resolveFieldValue 获取与报告一致的值
+    const reg = resolveFieldValue(c, 'region') || '未知';
+    const biz = resolveFieldValue(c, 'business_line') || resolveFieldValue(c, 'product_type') || '未分类';
     byRegion[reg] = (byRegion[reg] || 0) + 1;
     byBizLine[biz] = (byBizLine[biz] || 0) + 1;
   }
   return {
     total: customers.length,
-    byLevel, byRegion, byBizLine,
+    byRegion, byBizLine,
     pendingJobs: load().jobs.filter(j => j.status === 'running' || j.status === 'pending').length,
   };
 }
