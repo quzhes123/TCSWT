@@ -441,6 +441,28 @@
             <input type="text" x-model="kw" @input.debounce.400ms="loadCustomers()" placeholder="按关键词检索（客户名/区域/APP...）"
                    class="w-full border border-gray-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring focus:ring-blue-100 focus:border-[#165DFF]">
           </div>
+          <!-- 展业区域多选筛选 -->
+          <div x-data="{open:false}" @click.outside="open=false" class="relative flex-1 md:flex-none md:w-64">
+            <button @click="open=!open" class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-left flex items-center justify-between hover:border-[#165DFF]">
+              <span x-text="filterRegions.length ? filterRegions.length + ' 个区域' : '全部区域'" class="text-gray-700"></span>
+              <i class="fas fa-chevron-down text-xs text-gray-400"></i>
+            </button>
+            <div x-show="open" x-transition class="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-80 overflow-y-auto">
+              <div class="p-2 space-y-1">
+                <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                  <input type="checkbox" x-model="filterRegionsAll" @change="toggleAllRegions()" class="rounded border-gray-300 text-[#165DFF] focus:ring-[#165DFF]">
+                  <span class="text-sm text-gray-700 font-medium">全选/反选</span>
+                </label>
+                <hr class="my-1">
+                <template x-for="r in ['\u4e2d\u56fd','\u5370\u5ea6\u5c3c\u897f\u4e9a','\u83f2\u5f8b\u5bbe','\u8d8a\u5357','\u6cf0\u56fd','\u5370\u5ea6','\u5df4\u57fa\u65af\u5766','\u5b5f\u52a0\u62c9','\u9a6c\u6765\u897f\u4e9a','\u65b0\u52a0\u5761','\u58a8\u897f\u54e5','\u5df4\u897f','\u963f\u6839\u5ef7','\u5c3c\u65e5\u5229\u4e9a','\u80af\u5c3c\u4e9a']" :key="r">
+                  <label class="flex items-center gap-2 px-2 py-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                    <input type="checkbox" :value="r" x-model="filterRegions" @change="loadCustomers()" class="rounded border-gray-300 text-[#165DFF] focus:ring-[#165DFF]">
+                    <span class="text-sm" x-text="r"></span>
+                  </label>
+                </template>
+              </div>
+            </div>
+          </div>
           <button class="text-sm text-gray-500 hover:text-gray-700 md:ml-auto px-2 py-1" @click="loadAll()"><i class="fas fa-rotate mr-1"></i>刷新</button>
         </div>
       </div>
@@ -1079,6 +1101,8 @@ function app() {
     selectedIds: [],
     stats: {},
     kw: '', filterLevel: '', filterRegion: '',
+    filterRegions: [],           // 多选展业区域（中文国名）
+    filterRegionsAll: false,      // 全选复选框状态
 
     // 模型管理（嵌入 SPA 的「模型管理」tab）
     models: [],
@@ -1565,10 +1589,22 @@ function app() {
       if (this.kw) params.set('q', this.kw);
       if (this.filterLevel) params.set('level', this.filterLevel);
       if (this.filterRegion) params.set('region', this.filterRegion);
+      // 多选区域：用 regions=印度尼西亚,菲律宾 格式
+      if (this.filterRegions.length) params.set('regions', this.filterRegions.join(','));
       this.customers = await fetch('/api/customers?' + params.toString()).then(r => r.json());
       // 清掉已不在当前列表中的选中项（搜索过滤后保持一致性）
       const valid = new Set(this.customers.map(c => c.id));
       this.selectedIds = this.selectedIds.filter(id => valid.has(id));
+    },
+
+    toggleAllRegions() {
+      const all = ['中国','印度尼西亚','菲律宾','越南','泰国','印度','巴基斯坦','孟加拉','马来西亚','新加坡','墨西哥','巴西','阿根廷','尼日利亚','肯尼亚'];
+      if (this.filterRegionsAll) {
+        this.filterRegions = [...all];
+      } else {
+        this.filterRegions = [];
+      }
+      this.loadCustomers();
     },
 
     selectAll() {

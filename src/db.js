@@ -274,6 +274,35 @@ export function resolveDisplayName(customer_id) {
   return pick(cust.customer_name);
 }
 
+/**
+ * 通用字段解析：与报告中显示的值保持一致。
+ * 优先级：manual_fields > is_merged 结论 > raw_known > customer[fieldKey]
+ * @param {string|object} customer_id_or_obj
+ * @param {string} fieldKey
+ * @returns {string}
+ */
+export function resolveFieldValue(customer_id_or_obj, fieldKey) {
+  const cust = typeof customer_id_or_obj === 'object' ? customer_id_or_obj : getCustomer(customer_id_or_obj);
+  if (!cust || !fieldKey) return '';
+  const pick = (v) => (v == null ? '' : String(v).trim());
+  // 1) 人工修正
+  const manual = pick(cust.manual_fields?.[fieldKey]);
+  if (manual) return manual;
+  // 2) 调研合并结论
+  const results = getResultsByCustomer(cust.id);
+  const merged = results.find(r => r.is_merged && r.field === fieldKey)
+              || results.find(r => r.field === fieldKey);
+  if (merged && ['filled', 'agree', 'conflict'].includes(merged.status)) {
+    const mv = pick(merged.value);
+    if (mv) return mv;
+  }
+  // 3) raw_known
+  const known = pick(cust.raw_known?.[fieldKey]);
+  if (known) return known;
+  // 4) 兜底：客户记录上同名字段
+  return pick(cust[fieldKey]);
+}
+
 // ========== 看板统计 ==========
 export function computeStats() {
   const customers = load().customers;
@@ -486,8 +515,18 @@ export function createFieldDef(input) {
   const s = load();
   const now = Date.now();
   const maxOrder = s.field_defs.reduce((m, f) => Math.max(m, f.order ?? 0), 0);
+  // 允许传入自定义 key（内置/课件级字段），但不能与现有 key 冲突
+  let keyId;
+  if (input.key && typeof input.key === 'string' && /^[a-z][a-z0-9_]{1,63}$/i.test(input.key)) {
+    if (s.field_defs.some(x => x.key === input.key)) {
+      throw new Error('字段 key 已存在：' + input.key);
+    }
+    keyId = input.key;
+  } else {
+    keyId = 'f_' + nanoid(8);
+  }
   const f = {
-    key: 'f_' + nanoid(8),
+    key: keyId,
     label: String(input.label || '').trim() || '未命名字段',
     group: sanitizeGroup(input.group),
     hint: String(input.hint || '').trim(),

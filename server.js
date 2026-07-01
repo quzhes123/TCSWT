@@ -208,10 +208,9 @@ app.post('/api/upload', async (req, reply) => {
 
 // ============ API: 客户列表 / 详情 / 看板 ============
 app.get('/api/customers', async (req) => {
-  const { q, level, region } = req.query || {};
+  const { q, level, region, regions } = req.query || {};
   let list = db.listCustomers();
   if (level) list = list.filter(c => c.customer_level === level);
-  if (region) list = list.filter(c => c.region === region);
   if (q) {
     const kw = String(q).toLowerCase();
     list = list.filter(c => Object.values(c.raw_known || {}).some(v => String(v || '').toLowerCase().includes(kw)));
@@ -220,7 +219,7 @@ app.get('/api/customers', async (req) => {
   const allResults = db.listResults();
   const activeFields = getActiveFields();
   const activeKeys = new Set(activeFields.map(f => f.key));
-  return list.map(c => {
+  const mapped = list.map(c => {
     const rs = allResults.filter(r => r.customer_id === c.id);
     // 已知字段：raw_known 中有值且仍在启用字段列表内
     const knownKeys = new Set(
@@ -243,8 +242,23 @@ app.get('/api/customers', async (req) => {
     const completeness = Math.min(100, Math.round((doneKeys.size / Math.max(activeFields.length, 1)) * 100));
     // 列表显示名 = 报告里的最新公司名称（人工修正 > 调研合并 > 原始输入 > 兜底），保证两处一致
     const customer_name = db.resolveDisplayName(c);
-    return { ...c, customer_name, _stat: { nKnown, nFilled, nConflict, completeness } };
+    // 列表字段也取报告值（region/business_line/product_type/app_name），保证与报告展示一致
+    const resolvedRegion = db.resolveFieldValue(c, 'region');
+    const business_line = db.resolveFieldValue(c, 'business_line');
+    const product_type = db.resolveFieldValue(c, 'product_type');
+    const app_name = db.resolveFieldValue(c, 'app_name');
+    return { ...c, customer_name, region: resolvedRegion, business_line, product_type, app_name, _stat: { nKnown, nFilled, nConflict, completeness } };
   });
+  // 区域过滤：支持旧参数 region（单值完全匹配）和新参数 regions（多选，逗号分隔，子串包含即命中）
+  let result = mapped;
+  if (region) result = result.filter(c => c.region === region);
+  if (regions) {
+    const arr = String(regions).split(',').map(s => s.trim()).filter(Boolean);
+    if (arr.length) {
+      result = result.filter(c => arr.some(r => String(c.region || '').includes(r)));
+    }
+  }
+  return result;
 });
 
 app.get('/api/customers/:id', async (req, reply) => {
