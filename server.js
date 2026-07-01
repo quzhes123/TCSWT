@@ -218,12 +218,29 @@ app.get('/api/customers', async (req) => {
   }
   // 顺带把每个客户的调研完整度算上
   const allResults = db.listResults();
+  const activeFields = getActiveFields();
+  const activeKeys = new Set(activeFields.map(f => f.key));
   return list.map(c => {
     const rs = allResults.filter(r => r.customer_id === c.id);
-    const nKnown = Object.entries(c.raw_known || {}).filter(([, v]) => v && String(v).trim()).length;
-    const nFilled = rs.filter(r => r.status === 'filled' || r.status === 'agree').length;
-    const nConflict = rs.filter(r => r.status === 'conflict').length;
-    const completeness = Math.round(((nKnown + nFilled) / Math.max(getActiveFields().length, 1)) * 100);
+    // 已知字段：raw_known 中有值且仍在启用字段列表内
+    const knownKeys = new Set(
+      Object.entries(c.raw_known || {})
+        .filter(([k, v]) => activeKeys.has(k) && v && String(v).trim())
+        .map(([k]) => k)
+    );
+    // 已调研填充：同一字段可能被多个模型或多次调研重复写入，按 key 去重
+    const filledKeys = new Set();
+    let nConflict = 0;
+    for (const r of rs) {
+      if (!activeKeys.has(r.field)) continue;   // 已禁用字段不计
+      if (r.status === 'filled' || r.status === 'agree') filledKeys.add(r.field);
+      else if (r.status === 'conflict') nConflict += 1;
+    }
+    // 取并集，避免同一字段既在 raw_known 又在 filled 里被重复计数
+    const doneKeys = new Set([...knownKeys, ...filledKeys]);
+    const nKnown = knownKeys.size;
+    const nFilled = filledKeys.size;
+    const completeness = Math.min(100, Math.round((doneKeys.size / Math.max(activeFields.length, 1)) * 100));
     // 列表显示名 = 报告里的最新公司名称（人工修正 > 调研合并 > 原始输入 > 兜底），保证两处一致
     const customer_name = db.resolveDisplayName(c);
     return { ...c, customer_name, _stat: { nKnown, nFilled, nConflict, completeness } };
