@@ -1435,7 +1435,7 @@ function app() {
         if (!map[g]) map[g] = [];
         map[g].push(f);
       }
-      const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      const order = ['basic','scale','app','product','biz','data','collection','people','goal','meta','custom'];
       const keys = [...order.filter(g => map[g]), ...Object.keys(map).filter(g => !order.includes(g))];
       return keys.map(g => [g, map[g]]);
     },
@@ -1447,7 +1447,7 @@ function app() {
         if (!map[g]) map[g] = [];
         map[g].push(f);
       }
-      const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      const order = ['basic','scale','app','product','biz','data','collection','people','goal','meta','custom'];
       const keys = [...order.filter(g => map[g]), ...Object.keys(map).filter(g => !order.includes(g))];
       return keys.map(g => [g, map[g]]);
     },
@@ -1849,7 +1849,7 @@ function app() {
         if (!map[g]) map[g] = [];
         map[g].push({ key: f.key, label: f.label, r, hint: f.hint, source_note: f.source_note, reference_urls: f.reference_urls || [] });
       }
-      const order = ['basic','app','product','biz','data','collection','people','goal','meta','custom'];
+      const order = ['basic','scale','app','product','biz','data','collection','people','goal','meta','custom'];
       return order.filter(g => map[g]).map(g => [g, map[g]]);
     },
   };
