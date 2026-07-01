@@ -371,7 +371,12 @@
             <span>任务 <code class="text-gray-600" x-text="job?.id"></code> ·
               <span class="tag" :class="{'tag-blue':job?.status==='running','tag-green':job?.status==='done','tag-red':job?.status==='failed'}" x-text="jobStatusText"></span>
             </span>
-            <span x-show="job?.progress" x-text="`${job?.progress?.done||0} / ${job?.progress?.total||0}`"></span>
+            <div class="flex items-center gap-3">
+              <span x-show="job?.progress" x-text="`${job?.progress?.done||0} / ${job?.progress?.total||0}`"></span>
+              <button x-show="job?.status==='running'" @click="cancelJob" class="text-red-500 hover:text-red-600 hover:underline" title="终止调研任务">
+                <i class="fas fa-stop-circle mr-0.5"></i>终止
+              </button>
+            </div>
           </div>
           <div class="progress-track"><div class="progress-bar" :style="`width: ${job && job.progress?.total ? Math.round(job.progress.done/job.progress.total*100) : 0}%`"></div></div>
 
@@ -1544,6 +1549,36 @@ function app() {
           }
         } catch {}
       }, 1500);
+    },
+    async cancelJob() {
+      if (!this.job || this.job.status !== 'running') return;
+      if (!confirm(`确认终止调研任务「${this.job.id}」？已完成的结果会保留。`)) return;
+      try {
+        const r = await fetch(`/api/jobs/${this.job.id}/cancel`, {
+          method: 'POST',
+          credentials: 'same-origin',
+        });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        if (r.status === 404) {
+          // 无 cancel 接口，降级：直接修改 job 状态
+          const r2 = await fetch(`/api/jobs/${this.job.id}/force-cancel`, {
+            method: 'POST',
+            credentials: 'same-origin',
+          });
+          if (!r2.ok) throw new Error('终止失败');
+        } else if (!r.ok) {
+          const data = await r.json();
+          throw new Error(data.error || '终止失败');
+        }
+        this.notify('调研任务已终止', 'ok');
+        clearInterval(this._pollTimer);
+        // 重新拉取 job 状态
+        const updated = await fetch(`/api/jobs/${this.job.id}`).then(r => r.json());
+        this.job = updated;
+        await this.loadAll();
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      }
     },
 
     get canResearch() {

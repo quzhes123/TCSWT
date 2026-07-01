@@ -357,6 +357,14 @@ app.get('/api/jobs/:id', async (req, reply) => {
   return j;
 });
 
+app.post('/api/jobs/:id/force-cancel', async (req, reply) => {
+  const j = db.getJob(req.params.id);
+  if (!j) return reply.code(404).send({ error: '任务不存在' });
+  if (j.status !== 'running') return reply.code(400).send({ error: '任务已结束，无法终止' });
+  db.updateJob(req.params.id, { status: 'cancelled', finished_at: Date.now() });
+  return { ok: true, message: '任务已终止' };
+});
+
 app.get('/api/jobs', async () => db.listJobs());
 
 // ============ API: 批量调研模板下载（表头 = 当前启用字段）============
