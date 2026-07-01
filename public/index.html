@@ -517,6 +517,7 @@
                   </td>
                   <td class="px-4 py-3 text-center cell-action whitespace-nowrap">
                     <button class="text-[#165DFF] hover:underline text-sm font-medium mr-3" @click.stop="openReport(c.id)" title="查看报告"><i class="fas fa-file-lines mr-1"></i>查看</button>
+                    <button class="text-emerald-600 hover:underline text-sm font-medium mr-3 disabled:opacity-40 disabled:cursor-not-allowed" @click.stop="reresearchCustomer(c)" :disabled="reresearchingCustomerId===c.id" :title="'对该客户的空缺/unknown 字段重新调研'"><i class="fas mr-1" :class="reresearchingCustomerId===c.id ? 'fa-spinner fa-spin' : 'fa-rotate'"></i><span x-text="reresearchingCustomerId===c.id ? '调研中' : '重新调研'"></span></button>
                     <button class="text-red-500 hover:underline text-sm font-medium mr-3" @click.stop="delCustomer(c)" title="删除该客户及其调研数据"><i class="fas fa-trash mr-1"></i>删除</button>
                     <a class="text-[#165DFF] hover:underline text-sm font-medium" :href="`/api/customers/${c.id}/export.xlsx`" target="_blank" @click.stop title="导出该客户的调研报告 Excel"><i class="fas fa-download mr-1"></i>导出</a>
                   </td>
@@ -1139,6 +1140,7 @@ function app() {
     resolveValue: '',   // 快速校验选定/填写的值
     resolveSaving: false,
     reresearchingKey: null, // 正在单字段重调研的 field key
+    reresearchingCustomerId: null, // 正在客户维度重调研的客户 id
     toasts: [],
     _toastId: 0,
 
@@ -1654,6 +1656,33 @@ function app() {
         await this.loadAll();
         this.notify('客户已删除', 'ok');
       } catch (e) { this.notify(String(e.message || e), 'err'); }
+    },
+    async reresearchCustomer(c) {
+      if (this.reresearchingCustomerId) { this.notify('已有客户正在调研，请稍候', 'err'); return; }
+      this.reresearchingCustomerId = c.id;
+      try {
+        const r = await fetch('/api/research', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ customer_ids: [c.id], only_missing: true }),
+        });
+        if (r.status === 401) { location.replace('/login.html'); return; }
+        const data = await r.json();
+        if (!r.ok) throw new Error(data.error || '调研任务创建失败');
+        this.notify(`「${c.customer_name}」重调研任务已启动`, 'ok');
+        // 切换到工作台并轮询任务进度
+        if (data.job) {
+          this.job = data.job;
+          this.lastReportCustomerId = c.id;
+          this.tab = 'workspace';
+          this.pollJob();
+        }
+      } catch (e) {
+        this.notify(String(e.message || e), 'err');
+      } finally {
+        this.reresearchingCustomerId = null;
+      }
     },
 
     // 进入人工编辑：把当前各字段值灌进 reportDraft
