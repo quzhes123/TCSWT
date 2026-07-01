@@ -1,5 +1,6 @@
 // Fastify 服务入口
-import 'dotenv/config';
+// dotenv 默认不覆盖已存在的环境变量，PM2(ecosystem) 传入的变量优先
+ import 'dotenv/config';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

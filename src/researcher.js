@@ -10,7 +10,7 @@ import { lookupAppMetrics, SURFUN_ENABLED } from './surfun.js';
 // 可由星盘直接取数的 APP 字段 → 取 lookupAppMetrics 返回的哪个属性
 const SURFUN_FIELD_MAP = {
   app_total_dl: 'installs',   // APP累计下载
-  app_ranking:  'rank',       // 排名
+  app_rank:     'rank',       // 排名
   app_operator: 'developer',  // APP运营主体
 };
 
@@ -253,16 +253,19 @@ export async function researchField({ customer, fieldKey, spec: customSpec, mode
 
   // ── 星盘短路：APP 类字段优先用信贷监控星盘直取，命中则跳过 LLM 搜索 ──
   if (SURFUN_ENABLED && SURFUN_FIELD_MAP[fieldKey]) {
-    const appName = customer.raw_known?.app_name || '';
+    // APP 名优先级：人工修正(manual_fields) > 原始输入(raw_known)
+    const appName = customer.manual_fields?.app_name || customer.raw_known?.app_name || '';
+    // 区域同理：人工修正 > 原始输入
+    const regionVal = customer.manual_fields?.region || customer.raw_known?.region || '';
     if (appName) {
       try {
-        const sr = await lookupAppMetrics(appName, customer.raw_known?.region || '');
+        const sr = await lookupAppMetrics(appName, regionVal);
         if (sr.ok && sr.best) {
           const prop = SURFUN_FIELD_MAP[fieldKey];
           let val = sr.best[prop];
           if (val !== undefined && val !== null && String(val).trim() !== '') {
             // 数值型（下载量/排名）加千分位友好展示
-            if ((fieldKey === 'app_total_dl' || fieldKey === 'app_ranking') && /^\d+$/.test(String(val))) {
+            if ((fieldKey === 'app_total_dl' || fieldKey === 'app_rank') && /^\d+$/.test(String(val))) {
               val = Number(val).toLocaleString('en-US');
             }
             return {
