@@ -401,30 +401,6 @@
 
     <!-- ============ Tab 2: 客户列表 / 看板 ============ -->
     <section x-show="tab==='customers'" class="space-y-4">
-      <!-- 看板 -->
-      <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <div class="card p-4">
-          <div class="text-xs text-gray-500">客户总数</div>
-          <div class="text-2xl font-bold mt-1" x-text="stats.total||0"></div>
-        </div>
-        <div class="card p-4">
-          <div class="text-xs text-gray-500">按展业区域</div>
-          <div class="mt-1.5 flex flex-wrap gap-1">
-            <template x-for="[k,v] in Object.entries(stats.byRegion||{})" :key="k">
-              <span class="tag tag-gray" x-text="`${k} ${v}`"></span>
-            </template>
-          </div>
-        </div>
-        <div class="card p-4">
-          <div class="text-xs text-gray-500">按业务线 / 产品</div>
-          <div class="mt-1.5 space-y-1 text-xs">
-            <template x-for="[k,v] in Object.entries(stats.byBizLine||{})" :key="k">
-              <div class="flex justify-between"><span x-text="k"></span><span class="font-semibold" x-text="v"></span></div>
-            </template>
-          </div>
-        </div>
-      </div>
-
       <!-- 搜索 -->
       <div class="card p-3">
         <div class="flex items-center gap-2 md:gap-3 flex-wrap">
@@ -513,11 +489,21 @@
                     <input type="checkbox" :value="c.id" x-model="selectedIds"
                            class="rounded border-gray-300 text-[#165DFF] focus:ring-[#165DFF]/30">
                   </td>
-                  <td class="px-4 py-3 cell-main" data-label="客户名称"><div class="font-medium" x-text="c.customer_name"></div></td>
-                  <td class="px-4 py-3" data-label="APP" x-text="c.raw_known?.app_name || '—'"></td>
-                  <td class="px-4 py-3" data-label="区域" x-text="c.region || '—'"></td>
-                  <td class="px-4 py-3" data-label="业务线" x-text="c.business_line || '—'"></td>
-                  <td class="px-4 py-3" data-label="产品" x-text="c.product_type || '—'"></td>
+                  <td class="px-4 py-3 cell-main" data-label="客户名称">
+                    <div class="font-medium truncate max-w-[150px]" :title="c.customer_name" x-text="c.customer_name"></div>
+                  </td>
+                  <td class="px-4 py-3" data-label="APP">
+                    <div class="truncate max-w-[150px]" :title="c.raw_known?.app_name || '—'" x-text="c.raw_known?.app_name || '—'"></div>
+                  </td>
+                  <td class="px-4 py-3" data-label="区域">
+                    <div class="truncate max-w-[150px]" :title="c.region || '—'" x-text="c.region || '—'"></div>
+                  </td>
+                  <td class="px-4 py-3" data-label="业务线">
+                    <div class="truncate max-w-[150px]" :title="c.business_line || '—'" x-text="c.business_line || '—'"></div>
+                  </td>
+                  <td class="px-4 py-3" data-label="产品">
+                    <div class="truncate max-w-[150px]" :title="c.product_type || '—'" x-text="c.product_type || '—'"></div>
+                  </td>
                   <td class="px-4 py-3" data-label="完整度">
                     <div class="flex items-center gap-2">
                       <div class="progress-track w-24"><div class="progress-bar" :style="`width:${c._stat?.completeness||0}%`"></div></div>
@@ -539,6 +525,27 @@
               <tr x-show="customers.length===0"><td colspan="9" class="text-center text-gray-400 py-8">暂无客户，请先到「智能调研」上传 V1.xlsx 或键入公司名称</td></tr>
             </tbody>
           </table>
+        </div>
+        <!-- 分页控件 -->
+        <div x-show="allCustomers.length > 0" class="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-white rounded-b-lg">
+          <div class="text-sm text-gray-600">
+            共 <span class="font-semibold" x-text="allCustomers.length"></span> 个客户，
+            当前第 <span class="font-semibold" x-text="page"></span> / <span class="font-semibold" x-text="Math.ceil(allCustomers.length / pageSize)"></span> 页
+          </div>
+          <div class="flex items-center gap-2">
+            <button @click="changePage(1)" :disabled="page === 1" class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+              首页
+            </button>
+            <button @click="changePage(page - 1)" :disabled="page === 1" class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+              上一页
+            </button>
+            <button @click="changePage(page + 1)" :disabled="page >= Math.ceil(allCustomers.length / pageSize)" class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+              下一页
+            </button>
+            <button @click="changePage(Math.ceil(allCustomers.length / pageSize))" :disabled="page >= Math.ceil(allCustomers.length / pageSize)" class="px-3 py-1.5 text-sm border border-gray-300 rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed">
+              尾页
+            </button>
+          </div>
         </div>
       </div>
     </section>
@@ -1090,6 +1097,9 @@ function app() {
     researchError: '',
 
     customers: [],
+    allCustomers: [],        // 全量客户列表（过滤后）
+    page: 1,                 // 当前页
+    pageSize: 20,            // 每页数量
     selectedIds: [],
     stats: {},
     kw: '', filterLevel: '', filterRegion: '',
@@ -1577,16 +1587,32 @@ function app() {
     },
 
     async loadCustomers() {
+      this.page = 1;  // 搜索/筛选时重置到第1页
       const params = new URLSearchParams();
       if (this.kw) params.set('q', this.kw);
       if (this.filterLevel) params.set('level', this.filterLevel);
       if (this.filterRegion) params.set('region', this.filterRegion);
       // 多选区域：用 regions=印度尼西亚,菲律宾 格式
       if (this.filterRegions.length) params.set('regions', this.filterRegions.join(','));
-      this.customers = await fetch('/api/customers?' + params.toString()).then(r => r.json());
+      this.allCustomers = await fetch('/api/customers?' + params.toString()).then(r => r.json());
+      // 分页截取
+      const start = (this.page - 1) * this.pageSize;
+      const end = start + this.pageSize;
+      this.customers = this.allCustomers.slice(start, end);
       // 清掉已不在当前列表中的选中项（搜索过滤后保持一致性）
-      const valid = new Set(this.customers.map(c => c.id));
+      const valid = new Set(this.allCustomers.map(c => c.id));
       this.selectedIds = this.selectedIds.filter(id => valid.has(id));
+    },
+
+    changePage(newPage) {
+      const totalPages = Math.ceil(this.allCustomers.length / this.pageSize);
+      if (newPage < 1 || newPage > totalPages) return;
+      this.page = newPage;
+      const start = (this.page - 1) * this.pageSize;
+      const end = start + this.pageSize;
+      this.customers = this.allCustomers.slice(start, end);
+      // 滚动到顶部
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     },
 
     toggleAllRegions() {
