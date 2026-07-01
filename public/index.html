@@ -493,7 +493,7 @@
                     <div class="font-medium truncate max-w-[150px]" :title="c.customer_name" x-text="c.customer_name"></div>
                   </td>
                   <td class="px-4 py-3" data-label="APP">
-                    <div class="truncate max-w-[150px]" :title="c.raw_known?.app_name || '—'" x-text="c.raw_known?.app_name || '—'"></div>
+                    <div class="truncate max-w-[150px]" :title="c.app_name || '—'" x-text="c.app_name || '—'"></div>
                   </td>
                   <td class="px-4 py-3" data-label="区域">
                     <div class="truncate max-w-[150px]" :title="c.region || '—'" x-text="c.region || '—'"></div>
@@ -723,7 +723,7 @@
       <div class="flex items-center justify-between">
         <div>
           <h3 class="text-lg font-semibold" x-text="report?.customer?.customer_name || '调查报告'"></h3>
-          <p class="text-xs text-gray-400 mt-0.5" x-text="(report?.customer?.region || '') + ' · ' + (report?.customer?.raw_known?.app_name || '')"></p>
+          <p class="text-xs text-gray-400 mt-0.5" x-text="(report?.customer?.region || '') + ' · ' + (report?.fields?.app_name?.value || report?.customer?.manual_fields?.app_name || report?.customer?.raw_known?.app_name || '')"></p>
         </div>
         <button class="text-gray-400 hover:text-gray-600" @click="reportOpen=false"><i class="fas fa-times text-lg"></i></button>
       </div>
